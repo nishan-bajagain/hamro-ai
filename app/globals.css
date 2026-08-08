@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #090b0f;
+  --color-panel: #0f1319;
+  --color-panel-2: #141a22;
+  --color-edge: #212836;
+  --color-edge-2: #2c3547;
+  --color-muted: #8b93a3;
+  --color-faint: #5c6472;
+  --color-accent: #34d399;
+  --color-accent-2: #22d3ee;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+  --color-violet: #a78bfa;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: #e5e8ee;
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: rgba(52, 211, 153, 0.25);
+}
+
+/* Slim dark scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2c3547 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2c3547;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Blinking caret for the assistant while streaming */
+@keyframes caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.caret-blink::after {
+  content: "▍";
+  margin-left: 2px;
+  animation: caret-blink 1s step-end infinite;
+  color: var(--color-accent);
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up {
+  animation: fade-up 0.25s ease-out both;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+/* Code blocks rendered by rehype-highlight inherit these token colors via
+   github-dark.css imported in the Markdown component. */
