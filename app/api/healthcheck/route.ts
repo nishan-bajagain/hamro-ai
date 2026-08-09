@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getConfiguredProviders, canonicalModelId } from "@/lib/config";
+import { corsHeaders } from "@/lib/auth";
 import { fetchChatCompletion, buildBody, parseErrorBody } from "@/lib/ai/providers";
 import { setProviderStatus } from "@/lib/db/log";
 
@@ -13,7 +14,7 @@ export async function POST() {
   if (inFlight) {
     return NextResponse.json(
       { running: true, message: "Health check already in progress" },
-      { status: 409 },
+      { status: 409, headers: corsHeaders() },
     );
   }
   inFlight = true;
@@ -72,7 +73,10 @@ export async function POST() {
         }
       }),
     );
-    return NextResponse.json({ checkedAt: new Date().toISOString(), results });
+    return NextResponse.json(
+      { checkedAt: new Date().toISOString(), results },
+      { headers: corsHeaders() },
+    );
   } finally {
     inFlight = false;
   }

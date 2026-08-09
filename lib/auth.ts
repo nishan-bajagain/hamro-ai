@@ -65,11 +65,29 @@ export function detectClient(request: Request): string {
   return ua.slice(0, 48) || "unknown";
 }
 
+/**
+ * CORS headers for every API response.
+ *
+ * `Access-Control-Allow-Headers` must list every header the gateway reads:
+ * `Authorization` + `Content-Type` (standard) and the gateway's own custom
+ * headers `x-session-id` (session-pinned random model) and `x-client`
+ * (client fingerprinting). If any of these is missing, browsers reject the
+ * cross-origin request at the preflight stage and the client sees a generic
+ * "Failed to fetch" — which is exactly how standalone browser UIs (e.g.
+ * index.html) appeared broken.
+ */
 export function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization, x-session-id, x-client, Accept",
+    // Browser JS can only read headers listed here on cross-origin responses;
+    // expose the X-Gateway-* diagnostics the clients log/display.
+    "Access-Control-Expose-Headers":
+      "x-gateway-provider, x-gateway-model, x-gateway-failovers, " +
+      "x-gateway-session-model, x-gateway-cache, x-gateway-latency-ms, " +
+      "x-rate-limit-limit, x-rate-limit-remaining",
     "Access-Control-Max-Age": "86400",
   };
 }

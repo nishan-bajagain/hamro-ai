@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { store } from "@/lib/db/store";
 import { PROVIDERS } from "@/lib/config";
+import { corsHeaders } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -179,8 +180,9 @@ export async function GET() {
       cached: r.cached,
     }));
 
-  return NextResponse.json({
-    updatedAt: new Date().toISOString(),
+  return NextResponse.json(
+    {
+      updatedAt: new Date().toISOString(),
     summary: {
       totalRequests,
       totalPromptTokens,
@@ -199,5 +201,5 @@ export async function GET() {
     perModel,
     perProvider,
     recent,
-  });
+  }, { headers: corsHeaders() });
 }
