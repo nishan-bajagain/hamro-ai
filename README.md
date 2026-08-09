@@ -29,6 +29,10 @@ coding agents like Claude Code, Cursor, Aider and custom CLI extensions.
 - **Telemetry, no database** — every call is logged (tokens, cost from standard pricing
   tables, latency, TTFT, failovers, client) to a plain **`data.json`** file and shown on
   `/status`. Works on serverless hosts too (auto in-memory fallback).
+- **Chat database in `data.json`** — the web client saves its chat history to the
+  gateway's own database via the auth-protected `/api/chats` API (no online JSON-blob
+  services; `localStorage` is only an offline cache). Per-key namespacing and size caps
+  keep it safe.
 - **Docs site** — a full in-app documentation page at `/docs` (API reference, free-access
   guide, agent setup) with sidebar TOC and copyable code blocks.
 - **Rate limiting + caching** — per-key sliding-window rate limits (`429` + `Retry-After`)
@@ -151,6 +155,23 @@ Response headers expose routing info: `x-gateway-provider`, `x-gateway-model`,
 
 Lists configured, operational models with `owned_by`, `context_length` and `pricing`.
 
+### Chat history database (`/api/chats`)
+
+The web client's chat history lives in `data.json` — the same database as telemetry —
+accessed through auth-protected endpoints (Bearer key required, namespaced per key):
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/chats` | Chat summaries (`?full=1` includes messages) |
+| `GET /api/chats/:id` | One full chat |
+| `POST /api/chats` | Create/update chats — `{id?, title, messages}` or `{chats: […]}` |
+| `DELETE /api/chats/:id` | Delete one chat |
+| `DELETE /api/chats` | Delete every chat for the key |
+
+Limits: 50 chats per key, 200 messages per chat, 200 KB per chat, 8 KB per message,
+100-char titles. Everything persists to `data.json` (and mirrors to KV on serverless
+hosts).
+
 ### Errors
 
 - `401` — missing/wrong `Authorization` header
@@ -167,12 +188,14 @@ app/
   status/page.tsx + /chat/page.tsx
   api/status/route.ts            public telemetry (dashboard polling)
   api/healthcheck/route.ts       provider pings (online/degraded/offline)
+  api/chats/route.ts             chat-history database (list/save/clear)
+  api/chats/[id]/route.ts        chat-history database (get/delete one)
 lib/
   ai/router.ts                   sticky failover, chain resolution, streaming pump
   ai/providers.ts                fetch layer, error parsing, SSE parser
   ai/pricing.ts                  per-model $/1M tables + cost estimation
   ai/tokens.ts                   char-based token estimation
-  db/store.ts                    JSON-file telemetry store (data.json, in-memory fallback)
+  db/store.ts                    JSON-file store (data.json telemetry + chats, KV mirror, in-memory fallback)
   db/log.ts                      request + provider-status logging helpers
   auth.ts                        timing-safe bearer validation + client detection
 ```

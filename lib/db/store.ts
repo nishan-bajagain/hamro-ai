@@ -58,14 +58,41 @@ export interface StoredProviderStatus {
   lastModel: string | null;
 }
 
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/** A saved conversation, stored in data.json like every other record. */
+export interface ChatDoc {
+  id: string;
+  title: string;
+  createdAt: Date;
+  updatedAt: Date;
+  messages: ChatMessage[];
+}
+
+/**
+ * Chat histories live in the same JSON database as telemetry (data.json, with
+ * the optional shared-KV mirror) — one file, one persistence layer. Chats are
+ * namespaced per API key (hashed, so raw keys never touch the file).
+ */
 interface StoreData {
   requests: StoredRequest[];
   providerStatus: Record<string, StoredProviderStatus>;
+  chats: Record<string, ChatDoc[]>;
   nextId: number;
 }
 
 /** Hard cap on retained request records (oldest are pruned first). */
 const MAX_REQUESTS = 5_000;
+/* ── chat caps (enforced at the store boundary, so every API is consistent) ── */
+export const MAX_CHATS_PER_KEY = 50;
+export const MAX_CHAT_MESSAGES = 200;
+export const MAX_CHAT_BYTES = 200_000;
+export const MAX_MESSAGE_CHARS = 8_000;
+export const MAX_TITLE_CHARS = 100;
+export const CHAT_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const PERSIST_DEBOUNCE_MS = 300;
 
 let seq = 0;
@@ -162,7 +189,7 @@ async function pickWritablePath(): Promise<string | null> {
 /* ────────────────────────── Load / save ───────────────────────────── */
 
 function emptyData(): StoreData {
-  return { requests: [], providerStatus: {}, nextId: 0 };
+  return { requests: [], providerStatus: {}, chats: {}, nextId: 0 };
 }
 
 function deserialize(raw: string): StoreData {
@@ -184,6 +211,22 @@ function deserialize(raw: string): StoreData {
             ) as Record<string, StoredProviderStatus>)
           : {},
       nextId: typeof parsed.nextId === "number" ? parsed.nextId : 0,
+      chats:
+        parsed.chats && typeof parsed.chats === "object"
+          ? (Object.fromEntries(
+              Object.entries(parsed.chats as Record<string, ChatDoc[]>).map(
+                ([owner, list]) => [
+                  owner,
+                  (Array.isArray(list) ? list : []).map((c) => ({
+                    ...c,
+                    createdAt: new Date(c.createdAt),
+                    updatedAt: new Date(c.updatedAt),
+                    messages: Array.isArray(c.messages) ? c.messages : [],
+                  })),
+                ],
+              ),
+            ) as Record<string, ChatDoc[]>)
+          : {},
     };
   } catch {
     return emptyData();
@@ -313,6 +356,120 @@ class JsonStore {
     merged.lastCheck = new Date();
     this.data.providerStatus[provider] = merged;
     this.schedulePersist();
+  }
+
+  /* ── chats (the data.json database) ── */
+
+  /** All chats owned by `owner`, oldest first (matches the client's list). */
+  async chatsFor(owner: string): Promise<ChatDoc[]> {
+    await this.ensureLoaded();
+    return (this.data.chats[owner] ?? []).map((c) => ({
+      ...c,
+      createdAt: new Date(c.createdAt),
+      updatedAt: new Date(c.updatedAt),
+      messages: c.messages.map((m) => ({ ...m })),
+    }));
+  }
+
+  /**
+   * Validate + save a chat. Creating (no id) or replacing (existing id).
+   * Enforces every cap here so all callers get identical, secure behavior.
+   */
+  async upsertChat(
+    owner: string,
+    input: {
+      id?: string;
+      title?: unknown;
+      messages?: unknown;
+    },
+  ): Promise<{ ok: true; doc: ChatDoc } | { ok: false; error: string }> {
+    await this.ensureLoaded();
+
+    if (input.id !== undefined && !CHAT_ID_PATTERN.test(String(input.id))) {
+      return { ok: false, error: "Invalid chat id." };
+    }
+    const title =
+      typeof input.title === "string" ? input.title.trim().slice(0, MAX_TITLE_CHARS) : "Chat";
+    if (!Array.isArray(input.messages) || input.messages.length === 0) {
+      return { ok: false, error: "`messages` must be a non-empty array." };
+    }
+    if (input.messages.length > MAX_CHAT_MESSAGES) {
+      return { ok: false, error: `A chat can hold at most ${MAX_CHAT_MESSAGES} messages.` };
+    }
+    const messages: ChatMessage[] = [];
+    for (const m of input.messages) {
+      if (!m || typeof m !== "object" || typeof (m as { role?: unknown }).role !== "string") {
+        return { ok: false, error: "Each message must have a `role`." };
+      }
+      const role = (m as { role: string }).role;
+      if (!["system", "user", "assistant"].includes(role)) {
+        return { ok: false, error: `Unsupported message role: '${role}'.` };
+      }
+      const content = (m as { content?: unknown }).content;
+      if (typeof content !== "string") {
+        return { ok: false, error: "Each message must have string `content`." };
+      }
+      if (content.length > MAX_MESSAGE_CHARS) {
+        return { ok: false, error: `A single message can be at most ${MAX_MESSAGE_CHARS} characters.` };
+      }
+      messages.push({ role: role as ChatMessage["role"], content });
+    }
+
+    const list = this.data.chats[owner] ?? [];
+    const now = new Date();
+    let doc: ChatDoc;
+    const existingIndex = input.id ? list.findIndex((c) => c.id === input.id) : -1;
+    if (existingIndex !== -1) {
+      doc = {
+        ...list[existingIndex],
+        title,
+        updatedAt: now,
+        messages,
+      };
+      list[existingIndex] = doc;
+    } else {
+      if (list.length >= MAX_CHATS_PER_KEY) {
+        return { ok: false, error: `You can store at most ${MAX_CHATS_PER_KEY} chats. Delete some first.` };
+      }
+      doc = {
+        id: input.id ?? `chat_${nextId()}`,
+        title,
+        createdAt: now,
+        updatedAt: now,
+        messages,
+      };
+      list.push(doc);
+    }
+    if (Buffer.byteLength(JSON.stringify(doc), "utf8") > MAX_CHAT_BYTES) {
+      return { ok: false, error: `A chat can be at most ${MAX_CHAT_BYTES} bytes.` };
+    }
+    this.data.chats[owner] = list;
+    this.schedulePersist();
+    return {
+      ok: true,
+      doc: { ...doc, createdAt: new Date(doc.createdAt), updatedAt: new Date(doc.updatedAt), messages: doc.messages.map((m) => ({ ...m })) },
+    };
+  }
+
+  /** Delete one chat. Returns false when it did not exist. */
+  async deleteChat(owner: string, id: string): Promise<boolean> {
+    await this.ensureLoaded();
+    const list = this.data.chats[owner] ?? [];
+    const idx = list.findIndex((c) => c.id === id);
+    if (idx === -1) return false;
+    list.splice(idx, 1);
+    this.data.chats[owner] = list;
+    this.schedulePersist();
+    return true;
+  }
+
+  /** Delete every chat owned by `owner`. */
+  async clearChats(owner: string): Promise<void> {
+    await this.ensureLoaded();
+    if (this.data.chats[owner]?.length) {
+      this.data.chats[owner] = [];
+      this.schedulePersist();
+    }
   }
 }
 

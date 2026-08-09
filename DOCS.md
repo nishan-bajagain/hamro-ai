@@ -290,6 +290,38 @@ The router implements **sticky success**:
    prioritized.
 4. Every attempt is logged; `/status` shows failover events with arrows.
 
+### Chat history database (`/api/chats`)
+
+The web client saves its chat history to the gateway's own database
+(`data.json` — the same file as telemetry) instead of an online JSON-blob
+service. Every endpoint requires the Bearer key and is **namespaced per key**
+(the key is hashed, so raw keys never hit the file), so one user can never
+read another's chats.
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/chats` | Chat summaries — add `?full=1` to include messages |
+| `GET /api/chats/:id` | One full chat (404 when missing) |
+| `POST /api/chats` | Create/update — `{id?, title, messages}` or `{chats: […]}` (bulk) |
+| `DELETE /api/chats/:id` | Delete one chat (204 / 404) |
+| `DELETE /api/chats` | Delete every chat for this key |
+
+```bash
+# Save a chat
+curl http://localhost:3000/api/chats \
+  -H "Authorization: Bearer nishan-bajagain" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"chat_1","title":"Refactor","messages":[{"role":"user","content":"hi"}]}'
+
+# List summaries
+curl http://localhost:3000/api/chats -H "Authorization: Bearer nishan-bajagain"
+```
+
+Enforced limits (400 on violation): **50 chats per key, 200 messages per chat,
+200 KB per chat, 8 KB per message, 100-char titles.** Chats persist to
+`data.json` and mirror to KV on serverless hosts, so history survives restarts
+wherever telemetry does.
+
 ### Rate limiting
 
 Every API key gets a sliding-window rate limit (default **120 requests/minute**).
@@ -521,7 +553,8 @@ restarts. Back it up with the rest of the project.
   request count) for uptime monitors and Vercel Cron; `200` when all providers are online,
   `503` when degraded.
 - **`data.json`** — all request logs + provider status (max 5,000 recent
-  records; oldest pruned). Plain JSON, no database engine.
+  records; oldest pruned) **plus the chat-history database** (`chats` section,
+  namespaced per key). Plain JSON, no database engine.
 
 Storage resolution order: shared **KV** (`KV_REST_API_URL` + `KV_REST_API_TOKEN`,
 optional — the only layer that survives across serverless instances) →
