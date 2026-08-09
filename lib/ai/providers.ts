@@ -32,13 +32,36 @@ export class ProviderRequestError extends Error {
 /** HTTP statuses that justify trying the next provider in the chain. */
 export function shouldFailover(status: number): boolean {
   // 400 is a malformed request — retrying another provider won't help.
+  // 402 (payment required) is included: several free-tier providers return
+  // it when the account has no balance, and the next provider should take over.
   return (
     status === 401 ||
+    status === 402 ||
     status === 403 ||
     status === 404 ||
     status === 429 ||
     status >= 500
   );
+}
+
+/**
+ * Providers known to accept `stream_options.include_usage` on streaming
+ * requests. The more exotic OpenAI-compatible APIs (Ollama, HuggingFace,
+ * Chutes, OpenCode) may reject unknown fields, so they are excluded and fall
+ * back to character-based token estimation instead.
+ */
+const SUPPORTS_INCLUDE_USAGE = new Set([
+  "groq",
+  "openrouter",
+  "naga",
+  "zenmux",
+  "llm7",
+  "cerebras",
+]);
+
+/** Whether the provider accepts the `stream_options` body field. */
+export function supportsIncludeUsage(providerId: string): boolean {
+  return SUPPORTS_INCLUDE_USAGE.has(providerId);
 }
 
 export function buildHeaders(provider: ProviderConfig): Record<string, string> {
@@ -63,7 +86,7 @@ export function buildBody(
   if (req.stream) {
     // Only providers known to support `stream_options.include_usage` get it;
     // for others we fall back to character-based token estimation.
-    if (provider.id !== "opencode") {
+    if (supportsIncludeUsage(provider.id)) {
       body.stream_options = {
         include_usage: true,
         ...(req.stream_options ?? {}),

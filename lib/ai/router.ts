@@ -1,5 +1,6 @@
 import {
   getProvider,
+  getConfiguredProviders,
   PROVIDERS,
   PROVIDER_IDS,
   parseFallbackChain,
@@ -106,6 +107,108 @@ function providerLatencyMs(providerId: string): number | undefined {
   return e && e.latencyEwma > 0 ? e.latencyEwma : undefined;
 }
 
+/* ─────────────────────── Random session stickiness ────────────────── */
+
+/**
+ * `model: "random"` (alias `"auto"`) picks a random configured model the
+ * first time a session asks, then pins it: every later request from the same
+ * session keeps using that exact model until the session goes idle past the
+ * TTL or the pinned model fails (then a fresh random model is picked).
+ *
+ * Sessions are keyed by `bearer + session-id` (session id = `x-session-id`
+ * header, else the request `user` field, else a client fingerprint).
+ */
+
+const RANDOM_SESSION_TTL_MS =
+  (Number.parseInt(process.env.RANDOM_SESSION_TTL_SECONDS ?? "3600", 10) ||
+    3600) * 1000;
+
+interface RandomPin {
+  provider: ProviderId;
+  model: string;
+  lastUsed: number;
+}
+
+const randomPins = new Map<string, RandomPin>();
+
+/** `true` for the special "pick a random model" selectors. */
+export function isRandomSelector(model: string): boolean {
+  return model === "random" || model === "auto";
+}
+
+function randomPinAlive(pin: RandomPin): boolean {
+  if (Date.now() - pin.lastUsed > RANDOM_SESSION_TTL_MS) return false;
+  const p = getProvider(pin.provider);
+  if (!p || !p.apiKey) return false;
+  if (!p.models.some((m) => m.id === pin.model)) return false;
+  // A pinned model whose provider is cooling down counts as failed — re-pick.
+  return !isProviderCoolingDown(pin.provider);
+}
+
+function sweepRandomPins(): void {
+  if (randomPins.size < 200) return;
+  const now = Date.now();
+  for (const [key, pin] of randomPins) {
+    if (now - pin.lastUsed > RANDOM_SESSION_TTL_MS) randomPins.delete(key);
+  }
+}
+
+/**
+ * Return the session's pinned random model (re-picking one if the pin is
+ * stale/expired/failed), or `null` when no model is configured at all.
+ */
+export function resolveRandomPin(
+  sessionKey: string | undefined,
+): ChainEntry | null {
+  const key = sessionKey || "default";
+  sweepRandomPins();
+  const existing = randomPins.get(key);
+  if (existing && randomPinAlive(existing)) {
+    existing.lastUsed = Date.now();
+    const p = getProvider(existing.provider);
+    return p ? { provider: p, model: existing.model } : null;
+  }
+
+  const pool: ChainEntry[] = [];
+  for (const p of getConfiguredProviders()) {
+    if (isProviderCoolingDown(p.id)) continue;
+    for (const m of p.models) pool.push({ provider: p, model: m.id });
+  }
+  if (pool.length === 0) return null;
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  randomPins.set(key, {
+    provider: pick.provider.id,
+    model: pick.model,
+    lastUsed: Date.now(),
+  });
+  return pick;
+}
+
+/** Drop the session's pin so the next `random` request re-picks a model. */
+export function clearRandomPin(sessionKey: string | undefined): void {
+  if (sessionKey) randomPins.delete(sessionKey);
+}
+
+/** True when (provider, model) is this session's pinned random model. */
+function isPinnedRandom(
+  sessionKey: string | undefined,
+  providerId: string,
+  model: string,
+): boolean {
+  if (!sessionKey) return false;
+  const pin = randomPins.get(sessionKey);
+  return !!pin && pin.provider === providerId && pin.model === model;
+}
+
+/** In-place Fisher–Yates shuffle. */
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 /* ────────────────────────── Chain resolution ──────────────────────── */
 
 interface ChainEntry {
@@ -136,8 +239,47 @@ function modelNotFound(model: string): ApiErrorBody {
  * Resolve the requested model id into an ordered candidate list:
  * [requested provider/model] + [rest of MODEL_FALLBACK_CHAIN], with
  * cooling-down providers pushed to the back.
+ *
+ * For the `random` / `auto` selector the session's pinned model comes first
+ * and the rest of the pool (shuffled, healthy providers first) serves as the
+ * fallback chain — the pinned model is never swapped out unless it errors.
  */
-export function resolveChain(requestedModel: string): ResolvedChain {
+export function resolveChain(
+  requestedModel: string,
+  sessionKey?: string,
+): ResolvedChain {
+  if (isRandomSelector(requestedModel)) {
+    const pinned = resolveRandomPin(sessionKey);
+    if (!pinned) {
+      return {
+        candidates: [],
+        error: {
+          status: 502,
+          body: {
+            error: {
+              message:
+                "No models are currently configured on this gateway — cannot pick a random model.",
+              type: "server_error",
+              param: null,
+              code: "no_models_configured",
+            },
+          },
+        },
+      };
+    }
+    const rest: ChainEntry[] = [];
+    for (const p of getConfiguredProviders()) {
+      for (const m of p.models) {
+        if (p.id === pinned.provider.id && m.id === pinned.model) continue;
+        rest.push({ provider: p, model: m.id });
+      }
+    }
+    shuffle(rest);
+    const healthy = rest.filter((c) => !isProviderCoolingDown(c.provider.id));
+    const cooling = rest.filter((c) => isProviderCoolingDown(c.provider.id));
+    return { candidates: [pinned, ...healthy, ...cooling] };
+  }
+
   const candidates: ChainEntry[] = [];
   const slash = requestedModel.indexOf("/");
   const head = slash === -1 ? "" : requestedModel.slice(0, slash);
@@ -241,9 +383,9 @@ export type NonStreamResult =
 
 export async function routeNonStream(
   req: ChatCompletionRequest,
-  opts: { signal?: AbortSignal; client?: string },
+  opts: { signal?: AbortSignal; client?: string; sessionKey?: string },
 ): Promise<NonStreamResult> {
-  const resolved = resolveChain(req.model);
+  const resolved = resolveChain(req.model, opts.sessionKey);
   if (resolved.error) {
     return { ok: false, status: resolved.error.status, body: resolved.error.body, failovers: 0 };
   }
@@ -273,6 +415,12 @@ export async function routeNonStream(
           lastErr.retryAfter ? lastErr.retryAfter * 1000 : undefined,
         );
         void recordProviderFailure(cand.provider.id, lastErr.message);
+        if (
+          isRandomSelector(req.model) &&
+          isPinnedRandom(opts.sessionKey, cand.provider.id, cand.model)
+        ) {
+          clearRandomPin(opts.sessionKey);
+        }
         if (!shouldFailover(lastErr.status)) break;
         continue;
       }
@@ -327,6 +475,12 @@ export async function routeNonStream(
         lastErr.retryAfter ? lastErr.retryAfter * 1000 : undefined,
       );
       void recordProviderFailure(cand.provider.id, lastErr.message);
+      if (
+        isRandomSelector(req.model) &&
+        isPinnedRandom(opts.sessionKey, cand.provider.id, cand.model)
+      ) {
+        clearRandomPin(opts.sessionKey);
+      }
     } finally {
       opts.signal?.removeEventListener("abort", onAbort);
     }
@@ -396,9 +550,9 @@ type FirstEvent =
  */
 export async function openStream(
   req: ChatCompletionRequest,
-  opts: { signal?: AbortSignal; client?: string },
+  opts: { signal?: AbortSignal; client?: string; sessionKey?: string },
 ): Promise<OpenStreamResult> {
-  const resolved = resolveChain(req.model);
+  const resolved = resolveChain(req.model, opts.sessionKey);
   if (resolved.error) {
     return { ok: false, status: resolved.error.status, body: resolved.error.body, failovers: 0 };
   }
@@ -440,6 +594,12 @@ export async function openStream(
           lastErr.retryAfter ? lastErr.retryAfter * 1000 : undefined,
         );
         void recordProviderFailure(cand.provider.id, lastErr.message);
+        if (
+          isRandomSelector(req.model) &&
+          isPinnedRandom(opts.sessionKey, cand.provider.id, cand.model)
+        ) {
+          clearRandomPin(opts.sessionKey);
+        }
         if (!shouldFailover(lastErr.status)) break;
         continue;
       }
@@ -464,6 +624,12 @@ export async function openStream(
         lastErr = first.error;
         lastProvider = cand.provider.id;
         try { reader.releaseLock(); } catch { /* ignore */ }
+        if (
+          isRandomSelector(req.model) &&
+          isPinnedRandom(opts.sessionKey, cand.provider.id, cand.model)
+        ) {
+          clearRandomPin(opts.sessionKey);
+        }
         if (!shouldFailover(first.error.status)) break;
         continue;
       }
@@ -520,6 +686,12 @@ export async function openStream(
         lastErr.retryAfter ? lastErr.retryAfter * 1000 : undefined,
       );
       void recordProviderFailure(cand.provider.id, lastErr.message);
+      if (
+        isRandomSelector(req.model) &&
+        isPinnedRandom(opts.sessionKey, cand.provider.id, cand.model)
+      ) {
+        clearRandomPin(opts.sessionKey);
+      }
     } finally {
       opts.signal?.removeEventListener("abort", onAbort);
     }

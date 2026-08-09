@@ -1,10 +1,11 @@
 # hamro.site — Free AI Gateway · Full Documentation
 
 A single, OpenAI-compatible API that gives you **free access to multiple frontier
-models** through one key and one URL. It aggregates three providers — **Groq**,
-**OpenRouter** and **OpenCode Zen** — into a smart routing layer with automatic
-failover, so coding agents (Claude Code, Cursor, Aider, OpenCode, custom CLIs)
-never see a broken connection.
+models** through one key and one URL. It aggregates ten providers — **Groq**,
+**OpenRouter**, **OpenCode Zen**, **Ollama Cloud**, **Naga AI**, **ZenMux**, **LLM7**,
+**Cerebras**, **Chutes** and **HuggingFace** — into a smart routing layer with
+automatic failover, so coding agents (Claude Code, Cursor, Aider, OpenCode, custom
+CLIs) never see a broken connection.
 
 ```
 Your agent / script
@@ -13,12 +14,14 @@ Your agent / script
   ┌───────────────────┐
   │  hamro.site       │   /v1/chat/completions, /v1/models
   │  smart router     │   sticky success + auto-failover
+  │  random mode      │   model: "random" → pinned per session
   └─────────┬─────────┘
             │
-   ┌────────┼────────────┐
-   ▼        ▼            ▼
- Groq     OpenRouter  OpenCode Zen
-(llama)  (nemotron)  (nemotron, deepseek)
+   ┌────────┼────────────┬──────────┬───────────┬───────────┐
+   ▼        ▼            ▼          ▼           ▼           ▼
+ Groq    OpenRouter  OpenCode   Ollama     Naga AI    HuggingFace
+(llama) (nemotron)  (deepseek) (nemotron)  (nemotron)  (llama, deepseek)
+ + ZenMux · LLM7 · Cerebras · Chutes
 ```
 
 ---
@@ -50,22 +53,52 @@ Your agent / script
 
 ## The free models
 
-All five models are **100% free** (the router also tracks estimated cost for the
-paid fallback entries):
+Nearly every model is **100% free** (the router also tracks estimated cost for the
+paid fallback entries). The full catalog is always available from `GET /v1/models`;
+highlights:
 
 | Model id (use this in `model`) | Provider | Context | Notes |
 | --- | --- | --- | --- |
 | `groq/llama-3.3-70b-versatile` | Groq | 131k | Very fast, great general coding |
-| `openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` | OpenRouter | 1M | Nemotron 3 Ultra, free tier |
+| `ollama/nemotron-3-ultra` | Ollama Cloud | 262k | Nemotron 3 Ultra, free cloud tier |
+| `ollama/gpt-oss:120b` | Ollama Cloud | 131k | GPT-OSS 120B, free |
+| `naga/nemotron-3-ultra-550b-a55b:free` | Naga AI | 1M | Nemotron 3 Ultra, free |
+| `naga/nemotron-3-super-120b-a12b:free` | Naga AI | 1M | Nemotron 3 Super, free |
+| `naga/llama-3.3-70b-instruct:free` | Naga AI | 131k | Llama 3.3 70B, free |
+| `naga/llama-4-scout-17b-16e-instruct:free` | Naga AI | 1M | Llama 4 Scout, free |
+| `llm7/gpt-oss:20b` | LLM7 | 128k | GPT-OSS 20B, free turbo tier |
+| `huggingface/meta-llama/Llama-3.3-70B-Instruct` | HuggingFace | 131k | Llama 3.3 70B |
+| `huggingface/deepseek-ai/DeepSeek-V4-Flash` | HuggingFace | 1M | DeepSeek V4 Flash |
+| `huggingface/zai-org/GLM-5.2` | HuggingFace | 1M | GLM 5.2 |
+| `zenmux/deepseek/deepseek-v4-flash-free` | ZenMux | 131k | DeepSeek V4 Flash, free |
+| `zenmux/z-ai/glm-4.7-flash-free` | ZenMux | 131k | GLM 4.7 Flash, free |
+| `cerebras/zai-glm-4.7` | Cerebras | 131k | GLM 4.7 on Cerebras |
 | `openrouter/openrouter/free` | OpenRouter | 200k | Auto-routes to OpenRouter's best free model |
-| `opencode/nemotron-3-ultra-free` | OpenCode Zen | 131k | Nemotron 3 Ultra, free |
 | `opencode/deepseek-v4-flash-free` | OpenCode Zen | 131k | DeepSeek V4 Flash, free, shows reasoning |
+| `random` | any | — | **Picks a random model, pinned per session** (see below) |
 
 You can also pass a **bare model id** (`llama-3.3-70b-versatile`) — the router
 resolves it against the catalog automatically.
 
 > The canonical id is `provider/model`. Because the OpenRouter model id is
 > itself `openrouter/free`, its canonical id is `openrouter/openrouter/free`.
+
+### Random model mode
+
+Set `"model": "random"` (alias `"auto"`) and the gateway picks a random configured
+model the first time your session asks. That model is then **pinned to your
+session**: every later request from the same client keeps using the exact same
+model — it never switches on its own. The pin is released only when:
+
+- the session goes idle past `RANDOM_SESSION_TTL_SECONDS` (default 1 hour), or
+- the pinned model returns an error (401/402/403/404/429/5xx, timeout, network
+  failure) — the request then fails over to other random models and the next
+  request picks a fresh random one.
+
+Sessions are identified by (API key + `x-session-id` header, else the request
+`user` field, else a client fingerprint). Every random response includes the
+`X-Gateway-Session-Model` header with the canonical model that was actually used,
+so you always know which model served you.
 
 ---
 
@@ -281,8 +314,14 @@ Default chain (edit `MODEL_FALLBACK_CHAIN` in `.env`):
 
 ```
 groq/llama-3.3-70b-versatile
+  → ollama/nemotron-3-ultra
+  → naga/nemotron-3-ultra-550b-a55b:free
+  → llm7/gpt-oss:20b
+  → huggingface/meta-llama/Llama-3.3-70B-Instruct
   → openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
-  → openrouter/openrouter/free
+  → zenmux/deepseek/deepseek-v4-flash-free
+  → cerebras/zai-glm-4.7
+  → chutes/deepseek-ai/DeepSeek-V4-Flash-0731-TEE
   → opencode/nemotron-3-ultra-free
   → opencode/deepseek-v4-flash-free
 ```
@@ -365,8 +404,15 @@ need your own (all free):
 | **Groq** | https://console.groq.com/keys | Free tier with generous rate limits; `llama-3.3-70b-versatile` is free |
 | **OpenRouter** | https://openrouter.ai/keys | Free models (`:free` suffix, `openrouter/free`) cost $0 |
 | **OpenCode Zen** | https://opencode.ai (sign in → API keys) | Free models: `nemotron-3-ultra-free`, `deepseek-v4-flash-free` |
+| **Ollama Cloud** | https://ollama.com (sign in → API keys) | Free cloud models (`nemotron-3-ultra`, `gpt-oss:120b`, …) |
+| **Naga AI** | https://naga.ac | Free models with `:free` suffix |
+| **ZenMux** | https://zenmux.ai | Free models with `-free` suffix |
+| **LLM7** | https://llm7.io | Free turbo tier (`gpt-oss:20b`, `gemma4:31b`, …) |
+| **Cerebras** | https://cloud.cerebras.ai | Free tier models (`zai-glm-4.7`, …) |
+| **Chutes** | https://chutes.ai | TEE-hosted open models |
+| **HuggingFace** | https://huggingface.co/settings/tokens | Free inference with monthly credits |
 
-Copy them into `.env`:
+Copy them into `.env` (see `.env.example` for the full template):
 
 ```env
 PUBLIC_API_KEY="nishan-bajagain"
@@ -374,7 +420,14 @@ GROQ_API_KEY="gsk_..."
 OPENROUTER_API_KEY="sk-or-..."
 OPENCODE_API_KEY="sk-..."
 OPENCODE_BASE_URL="https://opencode.ai/zen/v1"
-MODEL_FALLBACK_CHAIN="groq/llama-3.3-70b-versatile,openrouter/nvidia/nemotron-3-ultra-550b-a55b:free,openrouter/openrouter/free,opencode/nemotron-3-ultra-free,opencode/deepseek-v4-flash-free"
+OLLAMA_API_KEY="..."
+NAGA_API_KEY="ng-..."
+ZENMUX_API_KEY="sk-mg-v1-..."
+LLM7_API_KEY="..."
+CEREBRAS_API_KEY="csk-..."
+CHUTES_API_KEY="cpk_..."
+HUGGINGFACE_API_KEY="hf_..."
+MODEL_FALLBACK_CHAIN="groq/llama-3.3-70b-versatile,ollama/nemotron-3-ultra,naga/nemotron-3-ultra-550b-a55b:free,llm7/gpt-oss:20b,huggingface/meta-llama/Llama-3.3-70B-Instruct,openrouter/nvidia/nemotron-3-ultra-550b-a55b:free,zenmux/deepseek/deepseek-v4-flash-free,cerebras/zai-glm-4.7,chutes/deepseek-ai/DeepSeek-V4-Flash-0731-TEE,opencode/nemotron-3-ultra-free,opencode/deepseek-v4-flash-free"
 ```
 
 ---

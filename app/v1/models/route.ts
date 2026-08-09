@@ -39,6 +39,22 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const maxContext = Math.max(
+    0,
+    ...getConfiguredProviders().flatMap((p) => p.models.map((m) => m.context)),
+  );
+
+  // Virtual "random" model: the router picks a random configured model and
+  // pins it per session until the user disconnects or the model errors.
+  const randomModel: ModelListResponse["data"][number] = {
+    id: "random",
+    object: "model",
+    created: CREATED_EPOCH,
+    owned_by: "hamro",
+    context_length: maxContext || 131072,
+    pricing: { input: "0", output: "0" },
+  };
+
   const data: ModelListResponse["data"] = getConfiguredProviders().flatMap(
     (p) =>
       p.models.map((m) => {
@@ -56,6 +72,8 @@ export async function GET(req: NextRequest) {
         };
       }),
   );
+
+  data.unshift(randomModel);
 
   return NextResponse.json(
     { object: "list", data } satisfies ModelListResponse,

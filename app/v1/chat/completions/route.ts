@@ -1,6 +1,12 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, corsHeaders, detectClient } from "@/lib/auth";
-import { openStream, routeNonStream } from "@/lib/ai/router";
+import {
+  openStream,
+  routeNonStream,
+  isRandomSelector,
+} from "@/lib/ai/router";
+import { canonicalModelId } from "@/lib/config";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { cacheGet, cacheSet } from "@/lib/cache";
 import { logRequestSafe } from "@/lib/db/log";
@@ -70,6 +76,36 @@ function rateLimitHeaders(rl: {
   };
 }
 
+/**
+ * Derive a stable per-client session key for the sticky random model.
+ *
+ * Precedence: an explicit `x-session-id` header, then the request `user`
+ * field, then a fingerprint of (client, user-agent, IP). The bearer key is
+ * always mixed in so different users never share a pin. Hashing keeps raw
+ * identifiers out of memory.
+ */
+function sessionKeyFor(
+  req: NextRequest,
+  bearer: string,
+  body: Partial<ChatCompletionRequest>,
+): string {
+  const explicit = req.headers.get("x-session-id")?.trim();
+  const userField =
+    typeof body.user === "string" && body.user.trim() ? body.user.trim() : "";
+  const idPart =
+    explicit ||
+    userField ||
+    [
+      detectClient(req),
+      req.headers.get("user-agent") ?? "",
+      req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "",
+    ].join("|");
+  return createHash("sha256")
+    .update(`${bearer}::${idPart}`)
+    .digest("hex")
+    .slice(0, 32);
+}
+
 export async function POST(req: NextRequest) {
   const auth = requireAuth(req);
   if (!auth.ok) {
@@ -118,10 +154,16 @@ export async function POST(req: NextRequest) {
   }
 
   const client = detectClient(req);
+  const sessionKey = sessionKeyFor(req, bearer, body);
+  const randomRequested = isRandomSelector(body.model);
 
   // ── Streaming: failover happens before the first chunk is emitted ──
   if (body.stream) {
-    const result = await openStream(body, { signal: req.signal, client });
+    const result = await openStream(body, {
+      signal: req.signal,
+      client,
+      sessionKey,
+    });
     if (!result.ok) {
       const status = result.status === 429 ? 429 : 502;
       return NextResponse.json(result.body, { status, headers: corsHeaders() });
@@ -136,6 +178,14 @@ export async function POST(req: NextRequest) {
         "X-Gateway-Provider": result.start.provider,
         "X-Gateway-Model": result.start.servedModel,
         "X-Gateway-Failovers": String(result.start.failovers),
+        ...(randomRequested
+          ? {
+              "X-Gateway-Session-Model": canonicalModelId(
+                result.start.provider as Parameters<typeof canonicalModelId>[0],
+                result.start.servedModel,
+              ),
+            }
+          : {}),
         ...rateLimitHeaders(rl),
         ...corsHeaders(),
       },
@@ -180,7 +230,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const result = await routeNonStream(body, { signal: req.signal, client });
+    const result = await routeNonStream(body, {
+      signal: req.signal,
+      client,
+      sessionKey,
+    });
     if (!result.ok) {
       const status = result.status === 429 ? 429 : 502;
       return NextResponse.json(result.body, { status, headers: corsHeaders() });
@@ -193,6 +247,14 @@ export async function POST(req: NextRequest) {
         "X-Gateway-Model": result.servedModel,
         "X-Gateway-Failovers": String(result.failovers),
         "X-Gateway-Cache": "MISS",
+        ...(randomRequested
+          ? {
+              "X-Gateway-Session-Model": canonicalModelId(
+                result.provider as Parameters<typeof canonicalModelId>[0],
+                result.servedModel,
+              ),
+            }
+          : {}),
         ...rateLimitHeaders(rl),
         ...corsHeaders(),
       },
@@ -200,7 +262,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Non-streaming: full failover across the chain ──
-  const result = await routeNonStream(body, { signal: req.signal, client });
+  const result = await routeNonStream(body, {
+    signal: req.signal,
+    client,
+    sessionKey,
+  });
   if (!result.ok) {
     const status = result.status === 429 ? 429 : 502;
     return NextResponse.json(result.body, { status, headers: corsHeaders() });
@@ -211,6 +277,14 @@ export async function POST(req: NextRequest) {
       "X-Gateway-Provider": result.provider,
       "X-Gateway-Model": result.servedModel,
       "X-Gateway-Failovers": String(result.failovers),
+      ...(randomRequested
+        ? {
+            "X-Gateway-Session-Model": canonicalModelId(
+              result.provider as Parameters<typeof canonicalModelId>[0],
+              result.servedModel,
+            ),
+          }
+        : {}),
       ...rateLimitHeaders(rl),
       ...corsHeaders(),
     },
