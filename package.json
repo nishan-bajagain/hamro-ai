@@ -10,6 +10,7 @@
     "test": "node scripts/verify-sse.mjs",
     "test:api": "node scripts/verify-api.mjs",
     "test:store": "node scripts/verify-store.mjs",
+    "test:remote": "node scripts/verify-remote.mjs",
     "claude": "node scripts/run-claude.mjs",
     "claude:check": "node scripts/run-claude.mjs --check",
     "claude:serve": "node scripts/run-claude.mjs --serve-only",

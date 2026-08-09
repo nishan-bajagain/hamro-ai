@@ -27,8 +27,9 @@ coding agents like Claude Code, Cursor, Aider and custom CLI extensions.
   through verbatim (only the `model` field is rewritten); `stream_options.include_usage`
   is requested where supported.
 - **Telemetry, no database** — every call is logged (tokens, cost from standard pricing
-  tables, latency, TTFT, failovers, client) to a plain **`data.json`** file and shown on
-  `/status`. Works on serverless hosts too (auto in-memory fallback).
+  tables, latency, TTFT, failovers, client) to a plain **`data.json`** file, mirrored to a
+  free remote JSON blob (jsonblob auto-mode) so it survives serverless cold starts, and
+  shown on `/status`.
 - **Chat database in `data.json`** — the web client saves its chat history to the
   gateway's own database via the auth-protected `/api/chats` API (no online JSON-blob
   services; `localStorage` is only an offline cache). Per-key namespacing and size caps
@@ -39,8 +40,11 @@ coding agents like Claude Code, Cursor, Aider and custom CLI extensions.
   and an in-memory cache for deterministic requests (`x-gateway-cache: HIT`).
 - **Adaptive failover** — exponential provider cooldowns, latency-aware chain ordering
   (fastest provider first) and adaptive first-chunk timeouts.
-- **Playground** — a streaming chat UI (`/chat`) with model selector, system-prompt editor,
-  code highlighting, TTFT/latency readouts and copyable code blocks.
+- **Web chat** — a polished, light-themed streaming chat app (`/chat`): sidebar with
+  searchable, renameable, deletable conversation history (persisted server-side to
+  `data.json` via `/api/chats`, with a localStorage offline cache), grouped model
+  picker (incl. `Auto`/random), markdown + code highlighting, copy/regenerate,
+  suggestion cards, settings, mobile drawer, and per-response routing readouts.
 
 ## Models configured
 
@@ -98,9 +102,11 @@ Every provider accepts an optional `<PROVIDER>_BASE_URL` override and a
 `<PROVIDER>_MODELS` comma-separated model-list override (e.g. `OLLAMA_MODELS`).
 `NEXT_PUBLIC_PUBLIC_API_KEY` can override the key the built-in playground uses in the
 browser. Set `DATA_FILE` to an absolute writable path if you want telemetry persisted
-somewhere other than `./data.json`. On serverless hosts (e.g. Vercel) set
-`KV_REST_API_URL` + `KV_REST_API_TOKEN` from a free Vercel KV / Upstash store so
-`/status` telemetry survives cold starts (file storage there is ephemeral).
+somewhere other than `./data.json`. On serverless hosts (e.g. Vercel) `/status` data
+survives cold starts out of the box — the gateway auto-mirrors telemetry to a free
+[jsonblob.com](https://jsonblob.com) blob (zero setup, ~24h rolling window; set
+`REMOTE_JSON_URL` to any durable GET/PUT JSON endpoint for permanent history, or add
+`KV_REST_API_URL` + `KV_REST_API_TOKEN` from a free Vercel KV / Upstash store).
 `RANDOM_SESSION_TTL_SECONDS` (default 3600) controls
 how long a session keeps its randomly-picked model after last use.
 
@@ -195,7 +201,7 @@ lib/
   ai/providers.ts                fetch layer, error parsing, SSE parser
   ai/pricing.ts                  per-model $/1M tables + cost estimation
   ai/tokens.ts                   char-based token estimation
-  db/store.ts                    JSON-file store (data.json telemetry + chats, KV mirror, in-memory fallback)
+  db/store.ts                    JSON-file store (data.json telemetry + chats, KV + free remote-JSON mirror, in-memory fallback)
   db/log.ts                      request + provider-status logging helpers
   auth.ts                        timing-safe bearer validation + client detection
 ```

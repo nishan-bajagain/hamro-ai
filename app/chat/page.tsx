@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { ChatClient } from "@/components/ChatClient";
+import { ChatApp } from "@/components/chat/ChatApp";
 
 export const metadata: Metadata = {
-  title: "Playground — hamro.site",
-  description: "Test the free models behind the hamro.site AI gateway.",
+  title: "Chat — Hamro AI",
+  description: "Chat with free AI models, routed with automatic failover.",
 };
 
 export default function ChatPage() {
-  return <ChatClient />;
+  return <ChatApp />;
 }

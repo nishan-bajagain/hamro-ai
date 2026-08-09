@@ -514,18 +514,37 @@ vercel
 # set the env vars above in the Vercel dashboard (or `vercel env add`)
 ```
 
-**To keep `/status` data across cold starts on Vercel**, add a free
+**To keep `/status` data across cold starts on Vercel**, two free options
+(no database, no signup for the first one):
+
+**Option 1 — free remote JSON (zero setup).** The gateway auto-creates a free
+[jsonblob.com](https://jsonblob.com) blob on first write, remembers its URL in
+`data.json`, reuses it across restarts, and self-heals when the blob expires
+(jsonblob's free tier keeps blobs ~24h — a rolling window that matches the
+dashboard's "last 24h" focus). Telemetry then survives serverless cold starts
+with nothing to configure:
+
+```env
+# optional — durable endpoint you control (any JSON service speaking GET/PUT):
+# REMOTE_JSON_URL="https://jsonblob.com/api/jsonBlob/<id>"
+```
+
+Paste a `https://jsonblob.com/<id>` viewer URL and it is normalized to the API
+URL automatically. For permanent history, set `REMOTE_JSON_URL` to any durable
+JSON endpoint (or use Option 2).
+
+**Option 2 — Vercel KV / Upstash.** Add a free
 [Vercel KV / Upstash Redis](https://vercel.com/docs/storage/vercel-kv) store
-and set its two env vars. The gateway then persists telemetry to the shared
-KV (via plain `fetch` — no extra dependencies), so data survives instance
-recycling and restarts:
+and set its two env vars. The gateway persists telemetry to the shared KV (via
+plain `fetch` — no extra dependencies), so data survives instance recycling
+and restarts durably:
 
 ```env
 KV_REST_API_URL="https://your-kv.upstash.io"
 KV_REST_API_TOKEN="AUpX..."
 ```
 
-Without KV:
+Without any of the above:
 
 - Set `DATA_FILE` to a writable absolute path if you have a mounted volume
   (e.g. `/data/hamro-data.json`) to persist telemetry across cold starts.

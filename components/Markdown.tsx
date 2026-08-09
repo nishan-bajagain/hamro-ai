@@ -5,15 +5,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy } from "lucide-react";
-import "highlight.js/styles/github-dark.css";
+import "highlight.js/styles/github.css";
 
 /**
  * Renders assistant markdown with GitHub-flavored tables/lists and
- * syntax-highlighted, copyable code blocks.
+ * syntax-highlighted, copyable code blocks. Typography lives in
+ * .markdown-body (globals.css); this component layers on the code blocks.
  */
 export function Markdown({ content }: { content: string }) {
   return (
-    <div className="markdown-body text-[13.5px] leading-relaxed">
+    <div className="markdown-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
@@ -24,7 +25,7 @@ export function Markdown({ content }: { content: string }) {
               {...props}
               target="_blank"
               rel="noreferrer"
-              className="text-cyan-400 underline decoration-cyan-400/40 underline-offset-2 hover:text-cyan-300"
+              className="text-accent underline decoration-accent/40 underline-offset-2 hover:text-blue-700"
             />
           ),
           table: (props) => (
@@ -34,6 +35,12 @@ export function Markdown({ content }: { content: string }) {
                 className="my-2 w-full border-collapse text-left text-xs"
               />
             </div>
+          ),
+          th: (props) => (
+            <th {...props} className="border-b border-edge bg-panel-2 px-3 py-2 font-semibold text-zinc-900" />
+          ),
+          td: (props) => (
+            <td {...props} className="border-b border-edge/60 px-3 py-2 align-top" />
           ),
         }}
       >
@@ -48,8 +55,8 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   const text = extractText(children);
 
   return (
-    <div className="group relative my-3 overflow-hidden rounded-lg border border-edge bg-[#0d1117]">
-      <div className="flex items-center justify-between border-b border-edge/70 bg-[#161b22] px-3 py-1.5">
+    <div className="group relative my-3 overflow-hidden rounded-lg border border-edge bg-[#f7f8fa]">
+      <div className="flex items-center justify-between border-b border-edge bg-panel px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-wider text-faint">
           code
         </span>
@@ -60,11 +67,11 @@ function CodeBlock({ children }: { children?: ReactNode }) {
               setTimeout(() => setCopied(false), 1500);
             });
           }}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted opacity-0 transition-all hover:bg-white/5 hover:text-zinc-200 group-hover:opacity-100"
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-faint opacity-0 transition-all hover:bg-panel-2 hover:text-zinc-700 group-hover:opacity-100"
         >
           {copied ? (
             <>
-              <Check className="h-3 w-3 text-emerald-400" /> copied
+              <Check className="h-3 w-3 text-emerald-600" /> copied
             </>
           ) : (
             <>

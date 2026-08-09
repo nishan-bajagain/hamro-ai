@@ -20,15 +20,26 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "hamro.site — AI Gateway",
+  title: "Hamro AI — AI, Made Simple",
   description:
-    "Free, open-access OpenAI-compatible AI gateway. One API key, four free coding models, automatic failover.",
+    "Free, open-access AI chat and gateway. One public key, dozens of free models across ten providers, automatic failover — for people and for coding agents.",
   metadataBase: new URL("https://hamro.site"),
+  applicationName: "Hamro AI",
+  icons: {
+    icon: "/icon.svg",
+  },
   openGraph: {
-    title: "hamro.site — AI Gateway",
+    title: "Hamro AI — AI, Made Simple",
     description:
-      "Free OpenAI-compatible AI gateway for coding agents with automatic failover.",
+      "Chat with free AI models or point your coding agent at the gateway — one key, automatic failover.",
     type: "website",
+    siteName: "Hamro AI",
+  },
+  twitter: {
+    card: "summary",
+    title: "Hamro AI — AI, Made Simple",
+    description:
+      "Free AI chat and gateway with automatic failover across ten providers.",
   },
 };
 
@@ -40,7 +51,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-[#0a0c10] text-zinc-100">
+      <body className="min-h-full bg-[#fafafa] text-zinc-900">
         <SiteHeader />
         {children}
       </body>

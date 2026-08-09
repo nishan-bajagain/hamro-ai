@@ -8,6 +8,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TIMEOUT_MS = 15_000;
+/** How many models to try per provider before calling it down. Free tiers
+ *  rate-limit individual models, so a provider whose FIRST model is
+ *  exhausted should still report "online" when another model answers. */
+const MAX_PROBE_MODELS = 3;
 let inFlight = false;
 
 export async function POST() {
@@ -22,55 +26,57 @@ export async function POST() {
     const providers = getConfiguredProviders();
     const results = await Promise.all(
       providers.map(async (p) => {
-        const model = p.models[0];
-        const started = Date.now();
-        try {
-          const res = await fetchChatCompletion(
-            p,
-            buildBody(
-              {
-                model: canonicalModelId(p.id, model.id),
-                messages: [{ role: "user", content: "ping" }],
-                max_tokens: 1,
-                temperature: 0,
-                stream: false,
-              },
-              model.id,
+        // Try several models (not just the first) — a rate-limited or
+        // quota-blocked model must not mislabel a provider that still works.
+        const candidates = p.models.slice(0, MAX_PROBE_MODELS);
+        let lastError: string | null = null;
+        let lastModel: string = candidates[0]?.id ?? "";
+        for (const model of candidates) {
+          const started = Date.now();
+          try {
+            const res = await fetchChatCompletion(
               p,
-            ),
-            AbortSignal.timeout(TIMEOUT_MS),
-          );
-          const latencyMs = Date.now() - started;
-          if (res.ok) {
-            await setProviderStatus(p.id, "online", latencyMs, model.id);
-            return {
-              provider: p.id,
-              status: "online",
-              latencyMs,
-              model: model.id,
-            };
+              buildBody(
+                {
+                  model: canonicalModelId(p.id, model.id),
+                  messages: [{ role: "user", content: "ping" }],
+                  max_tokens: 1,
+                  temperature: 0,
+                  stream: false,
+                },
+                model.id,
+                p,
+              ),
+              AbortSignal.timeout(TIMEOUT_MS),
+            );
+            const latencyMs = Date.now() - started;
+            if (res.ok) {
+              await setProviderStatus(p.id, "online", latencyMs, model.id);
+              return {
+                provider: p.id,
+                status: "online",
+                latencyMs,
+                model: model.id,
+              };
+            }
+            const err = await parseErrorBody(res);
+            lastError = err.message;
+            lastModel = model.id;
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            lastError = message;
+            lastModel = model.id;
           }
-          const err = await parseErrorBody(res);
-          await setProviderStatus(p.id, "degraded", latencyMs, model.id, err.message);
-          return {
-            provider: p.id,
-            status: "degraded",
-            latencyMs,
-            model: model.id,
-            error: err.message,
-          };
-        } catch (e) {
-          const latencyMs = Date.now() - started;
-          const message = e instanceof Error ? e.message : String(e);
-          await setProviderStatus(p.id, "offline", latencyMs, model.id, message);
-          return {
-            provider: p.id,
-            status: "offline",
-            latencyMs,
-            model: model.id,
-            error: message,
-          };
         }
+        const latencyMs = null; // no successful probe to measure
+        await setProviderStatus(p.id, "degraded", latencyMs, lastModel, lastError ?? undefined);
+        return {
+          provider: p.id,
+          status: "degraded",
+          latencyMs,
+          model: lastModel,
+          error: lastError,
+        };
       }),
     );
     return NextResponse.json(

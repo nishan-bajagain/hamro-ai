@@ -9,11 +9,16 @@ export const dynamic = "force-dynamic";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function GET() {
-  const [requests, providerStatusList] = await Promise.all([
+  const [requests, providerStatusList, counters] = await Promise.all([
     store.requests(),
     store.providerStatuses(),
+    store.counters(),
   ]);
-  const since = Date.now() - DAY_MS;
+
+  // The incremental counters are authoritative (they survive request-log
+  // pruning and the compact remote snapshot). Fall back to iterating the log
+  // only if the counters have never been touched.
+  const useCounters = counters.requests > 0;
 
   /* ── Totals ── */
   let totalRequests = 0;
@@ -28,7 +33,36 @@ export async function GET() {
   let cachedResponses = 0;
   let last24hRequests = 0;
 
-  /* ── Per (model, provider) ── */
+  if (useCounters) {
+    totalRequests = counters.requests;
+    totalPromptTokens = counters.promptTokens;
+    totalCompletionTokens = counters.completionTokens;
+    totalTokens = counters.totalTokens;
+    totalCostUsd = counters.costUsd;
+    totalFailovers = counters.failovers;
+    latencySum = counters.latencySum;
+    errors = counters.errors;
+    streamingRequests = counters.streaming;
+    cachedResponses = counters.cached;
+    last24hRequests = counters.last24hRequests;
+  } else {
+    const since = Date.now() - DAY_MS;
+    for (const r of requests) {
+      totalRequests += 1;
+      totalPromptTokens += r.promptTokens;
+      totalCompletionTokens += r.completionTokens;
+      totalTokens += r.totalTokens;
+      totalCostUsd += r.costUsd;
+      totalFailovers += r.failovers;
+      latencySum += r.latencyMs;
+      if (r.statusCode !== 200) errors += 1;
+      if (r.stream) streamingRequests += 1;
+      if (r.cached) cachedResponses += 1;
+      if (r.timestamp.getTime() >= since) last24hRequests += 1;
+    }
+  }
+
+  /* ── Per model ── */
   const modelMap = new Map<
     string,
     {
@@ -45,71 +79,54 @@ export async function GET() {
     }
   >();
 
-  /* ── Per provider ── */
-  const providerMap = new Map<
-    string,
-    {
-      requests: number;
-      costUsd: number;
-      failovers: number;
-      latencySum: number;
-      lastUsed: number;
+  if (useCounters) {
+    for (const [model, m] of Object.entries(counters.perModel)) {
+      modelMap.set(model, {
+        model,
+        providers: new Set<string>(),
+        requests: m.requests,
+        promptTokens: m.promptTokens,
+        completionTokens: m.completionTokens,
+        totalTokens: m.totalTokens,
+        costUsd: m.costUsd,
+        latencySum: m.latencySum,
+        failovers: m.failovers,
+        lastUsed: m.lastUsed ? new Date(m.lastUsed).getTime() : 0,
+      });
     }
-  >();
-
-  for (const r of requests) {
-    totalRequests += 1;
-    totalPromptTokens += r.promptTokens;
-    totalCompletionTokens += r.completionTokens;
-    totalTokens += r.totalTokens;
-    totalCostUsd += r.costUsd;
-    totalFailovers += r.failovers;
-    latencySum += r.latencyMs;
-    if (r.statusCode !== 200) errors += 1;
-    if (r.stream) streamingRequests += 1;
-    if (r.cached) cachedResponses += 1;
-    if (r.timestamp.getTime() >= since) last24hRequests += 1;
-
-    const ts = r.timestamp.getTime();
-
-    const mk = r.servedModel || "unknown";
-    const me = modelMap.get(mk) ?? {
-      model: mk,
-      providers: new Set<string>(),
-      requests: 0,
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      costUsd: 0,
-      latencySum: 0,
-      failovers: 0,
-      lastUsed: 0,
-    };
-    me.providers.add(r.provider);
-    me.requests += 1;
-    me.promptTokens += r.promptTokens;
-    me.completionTokens += r.completionTokens;
-    me.totalTokens += r.totalTokens;
-    me.costUsd += r.costUsd;
-    me.latencySum += r.latencyMs;
-    me.failovers += r.failovers;
-    if (ts > me.lastUsed) me.lastUsed = ts;
-    modelMap.set(mk, me);
-
-    const pk = r.provider || "unknown";
-    const pe = providerMap.get(pk) ?? {
-      requests: 0,
-      costUsd: 0,
-      failovers: 0,
-      latencySum: 0,
-      lastUsed: 0,
-    };
-    pe.requests += 1;
-    pe.costUsd += r.costUsd;
-    pe.failovers += r.failovers;
-    pe.latencySum += r.latencyMs;
-    if (ts > pe.lastUsed) pe.lastUsed = ts;
-    providerMap.set(pk, pe);
+    // Providers are not tracked per model inside counters; derive them from
+    // the recent request tail (they only matter for display).
+    for (const r of requests) {
+      const me = modelMap.get(r.servedModel);
+      me?.providers.add(r.provider);
+    }
+  } else {
+    for (const r of requests) {
+      const ts = r.timestamp.getTime();
+      const mk = r.servedModel || "unknown";
+      const me = modelMap.get(mk) ?? {
+        model: mk,
+        providers: new Set<string>(),
+        requests: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        costUsd: 0,
+        latencySum: 0,
+        failovers: 0,
+        lastUsed: 0,
+      };
+      me.providers.add(r.provider);
+      me.requests += 1;
+      me.promptTokens += r.promptTokens;
+      me.completionTokens += r.completionTokens;
+      me.totalTokens += r.totalTokens;
+      me.costUsd += r.costUsd;
+      me.latencySum += r.latencyMs;
+      me.failovers += r.failovers;
+      if (ts > me.lastUsed) me.lastUsed = ts;
+      modelMap.set(mk, me);
+    }
   }
 
   const perModel = [...modelMap.values()]
@@ -136,6 +153,40 @@ export async function GET() {
   }));
 
   const statusMap = new Map(providerStatusList.map((s) => [s.provider, s]));
+
+  const providerMap = new Map<
+    string,
+    { requests: number; costUsd: number; failovers: number; latencySum: number; lastUsed: number }
+  >();
+  if (useCounters) {
+    for (const [id, p] of Object.entries(counters.perProvider)) {
+      providerMap.set(id, {
+        requests: p.requests,
+        costUsd: p.costUsd,
+        failovers: p.failovers,
+        latencySum: p.latencySum,
+        lastUsed: p.lastUsed ? new Date(p.lastUsed).getTime() : 0,
+      });
+    }
+  } else {
+    for (const r of requests) {
+      const ts = r.timestamp.getTime();
+      const pk = r.provider || "unknown";
+      const pe = providerMap.get(pk) ?? {
+        requests: 0,
+        costUsd: 0,
+        failovers: 0,
+        latencySum: 0,
+        lastUsed: 0,
+      };
+      pe.requests += 1;
+      pe.costUsd += r.costUsd;
+      pe.failovers += r.failovers;
+      pe.latencySum += r.latencyMs;
+      if (ts > pe.lastUsed) pe.lastUsed = ts;
+      providerMap.set(pk, pe);
+    }
+  }
 
   const perProvider = providerMeta.map((meta) => {
     const agg = providerMap.get(meta.id);

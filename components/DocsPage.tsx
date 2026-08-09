@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, Hash, Menu, X } from "lucide-react";
-import "highlight.js/styles/github-dark.css";
+import "highlight.js/styles/github.css";
 
 interface TocItem {
   level: number;
@@ -79,8 +79,8 @@ export function DocsPage({ markdown }: { markdown: string }) {
               style={{ paddingLeft: `${(item.level - 1) * 12 + 12}px` }}
               className={`block border-l-2 py-1 text-[13px] transition-colors ${
                 active === item.id
-                  ? "border-emerald-400 text-emerald-300"
-                  : "border-transparent text-muted hover:text-zinc-200"
+                  ? "border-accent text-accent"
+                  : "border-transparent text-muted hover:text-zinc-700"
               }`}
             >
               {item.text}
@@ -93,20 +93,20 @@ export function DocsPage({ markdown }: { markdown: string }) {
       <div className="fixed bottom-4 right-4 z-50 lg:hidden">
         <button
           onClick={() => setMenuOpen((v) => !v)}
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-edge-2 bg-panel text-zinc-200 shadow-lg shadow-black/40"
+          className="flex h-11 w-11 items-center justify-center rounded-full border border-edge-2 bg-panel text-zinc-700 shadow-lg shadow-zinc-900/10"
           aria-label="Table of contents"
         >
           {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
         {menuOpen && (
-          <div className="absolute bottom-14 right-0 max-h-80 w-64 overflow-y-auto rounded-xl border border-edge bg-panel p-2 shadow-xl shadow-black/50">
+          <div className="absolute bottom-14 right-0 max-h-80 w-64 overflow-y-auto rounded-xl border border-edge bg-panel p-2 shadow-xl shadow-zinc-900/10">
             {toc.map((item) => (
               <a
                 key={item.id}
                 href={`#${item.id}`}
                 onClick={() => setMenuOpen(false)}
                 style={{ paddingLeft: `${(item.level - 1) * 12 + 8}px` }}
-                className="block rounded-md py-1.5 text-[13px] text-muted hover:bg-panel-2 hover:text-zinc-100"
+                className="block rounded-md py-1.5 text-[13px] text-muted hover:bg-panel-2 hover:text-zinc-900"
               >
                 {item.text}
               </a>
@@ -142,13 +142,13 @@ export function DocsPage({ markdown }: { markdown: string }) {
                 {...props}
                 target={props.href?.startsWith("#") ? undefined : "_blank"}
                 rel="noreferrer"
-                className="text-cyan-400 underline decoration-cyan-400/40 underline-offset-2 hover:text-cyan-300"
+                className="text-accent underline decoration-accent/40 underline-offset-2 hover:text-blue-700"
               />
             ),
             blockquote: (props) => (
               <blockquote
                 {...props}
-                className="my-4 rounded-r-lg border-l-2 border-emerald-400/60 bg-emerald-500/5 px-4 py-2 text-[14px] text-zinc-300"
+                className="my-4 rounded-r-lg border-l-2 border-blue-200 bg-blue-50 px-4 py-2 text-[14px] text-zinc-700"
               />
             ),
             table: (props) => (
@@ -195,7 +195,7 @@ function Heading({
       <a
         href={`#${slug}`}
         aria-label="Link to section"
-        className="text-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-emerald-300"
+        className="text-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent"
       >
         <Hash className="h-4 w-4" />
       </a>
@@ -218,15 +218,15 @@ function CodeBlock({
 
   if (inline) {
     return (
-      <code className="rounded-md border border-edge bg-panel px-1.5 py-0.5 font-mono text-[12.5px] text-cyan-300">
+      <code className="rounded-md border border-edge bg-panel px-1.5 py-0.5 font-mono text-[12.5px] text-accent">
         {children}
       </code>
     );
   }
 
   return (
-    <div className="group relative my-4 overflow-hidden rounded-lg border border-edge bg-[#0d1117]">
-      <div className="flex items-center justify-between border-b border-edge/70 bg-[#161b22] px-3 py-1.5">
+    <div className="group relative my-4 overflow-hidden rounded-lg border border-edge bg-[#f7f8fa]">
+      <div className="flex items-center justify-between border-b border-edge bg-panel px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-wider text-faint">
           {lang}
         </span>
@@ -237,11 +237,11 @@ function CodeBlock({
               setTimeout(() => setCopied(false), 1500);
             });
           }}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted opacity-0 transition-all hover:bg-white/5 hover:text-zinc-200 group-hover:opacity-100"
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted opacity-0 transition-all hover:bg-panel-2 hover:text-zinc-700 group-hover:opacity-100"
         >
           {copied ? (
             <>
-              <Check className="h-3 w-3 text-emerald-400" /> copied
+              <Check className="h-3 w-3 text-emerald-600" /> copied
             </>
           ) : (
             <>
@@ -250,7 +250,7 @@ function CodeBlock({
           )}
         </button>
       </div>
-      <pre className="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-zinc-200">
+      <pre className="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-zinc-800">
         <code className={className}>{children}</code>
       </pre>
     </div>
