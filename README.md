@@ -112,7 +112,20 @@ export OPENAI_BASE_URL="https://hamro.site/v1"
 | Agent | Notes |
 | --- | --- |
 | **Cursor, Aider, OpenCode, Continue, Cline, Roo, Windsurf, Zed** | Work directly (OpenAI format) — see [DOCS.md](DOCS.md) |
-| **Claude Code** | Needs Anthropic protocol → use Claude Code Router (CCR) in front of this gateway — see [DOCS.md](DOCS.md) |
+| **Claude Code** | Works **directly** — the gateway speaks the Anthropic protocol natively (`/v1/messages`). One command: `npm run claude` — see [DOCS.md](DOCS.md) |
+
+### One command: run hamro.ai in Claude Code
+
+```bash
+npm run claude              # starts the gateway (if needed) + opens Claude Code
+npm run claude -- --check   # verify everything without opening Claude Code
+```
+
+The launcher starts the gateway on port 3000 if it isn't running, points Claude
+Code at it via an isolated `--settings` file (your global `~/.claude/settings.json`
+is never modified), sets the model (default `random` — pinned per session) and
+opens the Claude Code TUI. Use `--model <id>` to pick a specific model and
+`--restart` to force-restart a stale gateway build.
 
 Or plain curl:
 

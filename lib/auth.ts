@@ -5,6 +5,11 @@ import { PUBLIC_API_KEY } from "@/lib/config";
  * Validates `Authorization: Bearer <PUBLIC_API_KEY>` for every /v1/* call.
  * Uses a timing-safe comparison to avoid leaking key length via timing.
  */
+/** Verify a raw token (from `Authorization: Bearer` or `x-api-key`) against the gateway key. */
+export function verifyApiKey(token: string): boolean {
+  return timingSafeEqual(token, PUBLIC_API_KEY);
+}
+
 export function requireAuth(
   request: Request,
 ): { ok: true } | { ok: false; response: NextResponse } {
@@ -81,7 +86,8 @@ export function corsHeaders(): Record<string, string> {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Content-Type, Authorization, x-session-id, x-client, Accept",
+      "Content-Type, Authorization, x-session-id, x-client, Accept, " +
+      "x-api-key, anthropic-version",
     // Browser JS can only read headers listed here on cross-origin responses;
     // expose the X-Gateway-* diagnostics the clients log/display.
     "Access-Control-Expose-Headers":

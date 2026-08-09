@@ -10,7 +10,9 @@ const nextConfig: NextConfig = {
           { key: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS" },
           {
             key: "Access-Control-Allow-Headers",
-            value: "Content-Type, Authorization, x-session-id, x-client, Accept",
+            value:
+              "Content-Type, Authorization, x-session-id, x-client, Accept, " +
+              "x-api-key, anthropic-version",
           },
           {
             key: "Access-Control-Expose-Headers",

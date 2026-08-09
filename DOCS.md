@@ -332,31 +332,59 @@ groq/llama-3.3-70b-versatile
 
 ### Claude Code
 
-Claude Code speaks the **Anthropic** API protocol, so it cannot talk to an
-OpenAI-compatible endpoint directly. Use **Claude Code Router (CCR)** — a small
-free local gateway that translates Anthropic ↔ OpenAI and is built exactly for
-this:
+The gateway speaks the **Anthropic Messages protocol natively**
+(`POST /v1/messages` + `/v1/messages/count_tokens`), so Claude Code connects
+**directly — no proxy needed**. Claude Code's own Anthropic SDK calls the
+endpoint, which translates to the same smart router every other client uses
+(failover, `random` session pinning, tools, telemetry all work).
 
-1. Install CCR (Node 22+):
-   ```bash
-   npm install -g @musistudio/claude-code-router
-   ccr ui
-   ```
-   (or download the desktop app from
-   https://github.com/musistudio/claude-code-router/releases)
-2. In the CCR UI open **Providers → Add Provider → Custom**:
-   - **Base URL**: `http://localhost:3000/v1`
-   - **API key**: `nishan-bajagain`
-   - **Protocol**: OpenAI
-   - **Models**: paste the five model ids from [The free models](#the-free-models)
-3. Open **Server → Start**. CCR now listens at `http://127.0.0.1:3456`.
-4. Open **Agent Config → Claude Code**, pick a model (e.g.
-   `groq/llama-3.3-70b-versatile`), apply the profile, then start `claude`.
+**One command (recommended):**
 
-All requests now flow: `Claude Code → CCR → hamro.site → provider`, with
-failover handled by the gateway. (If you'd rather use a LiteLLM proxy, point
-Claude Code at LiteLLM's `/anthropic` route with `ANTHROPIC_BASE_URL` and have
-LiteLLM forward to this gateway.)
+```bash
+cd hamro.ai
+npm run claude              # starts the gateway if needed + opens Claude Code
+```
+
+What it does:
+
+1. Starts the gateway on port 3000 if it isn't already running (builds it on
+   first run, logs to `.freebuff/hamro-server.log`).
+2. Writes an **isolated** settings file (`.freebuff/claude-settings.json`) that
+   points Claude Code at the gateway — your global `~/.claude/settings.json` is
+   never modified. This matters because a global settings-file `env` block
+   overrides shell environment variables.
+3. Sets `ANTHROPIC_MODEL` (default `random` — a model is picked once per
+   session and pinned until it errors) and `ANTHROPIC_SMALL_FAST_MODEL` for
+   background tasks.
+4. Opens the Claude Code TUI.
+
+Useful variants:
+
+```bash
+npm run claude -- --check                    # verify gateway + config, don't open
+npm run claude -- --model groq/llama-3.3-70b-versatile   # pin a specific model
+npm run claude -- --restart                  # force-restart a stale gateway build
+npm run claude -- --port 4000                # different port
+```
+
+**Manual equivalent** (if you don't want to use the launcher): create
+`~/.claude/settings.json` with:
+
+```jsonc
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:3000",   // no /v1 — Claude Code appends it
+    "ANTHROPIC_AUTH_TOKEN": "nishan-bajagain",       // your gateway key
+    "ANTHROPIC_MODEL": "random",                     // or any model id from /v1/models
+    "ANTHROPIC_SMALL_FAST_MODEL": "groq/llama-3.3-70b-versatile"
+  }
+}
+```
+
+(If you prefer a proxy instead, **Claude Code Router (CCR)** still works: install
+`npm install -g @musistudio/claude-code-router`, add a custom OpenAI provider
+pointing at `http://localhost:3000/v1` with key `nishan-bajagain`, start the CCR
+server, and point Claude Code at `http://127.0.0.1:3456`.)
 
 ### Cursor
 
@@ -523,7 +551,7 @@ optional — the only layer that survives across serverless instances) →
 | `502 All providers failed` | Check each provider key in `.env` and run `POST /api/healthcheck`; look at `/status` for the failing provider's error. |
 | `429 rate limit exceeded` | You exceeded `RATE_LIMIT_RPM` — check the `Retry-After` header and back off, or raise the limit. |
 | `/status` resets on deploy | Vercel instances are ephemeral — add a free Vercel KV / Upstash store and set `KV_REST_API_URL` + `KV_REST_API_TOKEN` (or mount a volume via `DATA_FILE`). |
-| Claude Code won't connect | Claude Code needs Anthropic protocol — use CCR (see [Claude Code](#claude-code)). |
+| Claude Code won't connect | The gateway speaks Anthropic natively — run `npm run claude -- --check` and confirm the gateway is up on port 3000 (see [Claude Code](#claude-code)). |
 
 ---
 
