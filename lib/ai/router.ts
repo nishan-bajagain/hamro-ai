@@ -55,6 +55,18 @@ interface StickyEntry {
   latencyEwma: number;
 }
 
+/**
+ * NOTE — concurrency scope: this Map (like `randomPins` below, the rate
+ * limiter and the response cache) is in-memory, per-process state. It is safe
+ * under concurrent requests within a single Node process: JS is
+ * single-threaded and every read-modify-write above is synchronous (no `await`
+ * between read and write), so there are no data races. On a multi-instance /
+ * serverless deployment each instance keeps its own cooldown/latency view;
+ * the only consequence is that a failing provider may be attempted slightly
+ * more often than strictly necessary across instances — harmless, because
+ * failover is ultimately driven by real upstream errors. If cross-instance
+ * coordination ever matters, move this to a shared store (e.g. Redis).
+ */
 const sticky = new Map<string, StickyEntry>();
 
 const STICKY_BASE_COOLDOWN_MS = 30_000;
@@ -129,6 +141,7 @@ interface RandomPin {
   lastUsed: number;
 }
 
+// Per-process like `sticky` — see the concurrency note above it.
 const randomPins = new Map<string, RandomPin>();
 
 /** `true` for the special "pick a random model" selectors. */

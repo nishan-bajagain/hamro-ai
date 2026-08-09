@@ -16,6 +16,27 @@ import type { ApiErrorBody, ChatCompletion, ChatCompletionRequest } from "@/lib/
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Map a router error result to the documented HTTP contract (README/DOCS):
+ * 404 unknown model, 429 upstream rate limit / client rate limit, 499 client
+ * disconnect — anything else (all providers failed) becomes 502.
+ */
+function gatewayErrorStatus(status: number): number {
+  return status === 404 || status === 429 || status === 499 ? status : 502;
+}
+
+/** Error responses keep the same X-Gateway-* diagnostics as success ones. */
+function gatewayErrorHeaders(result: {
+  provider?: string;
+  failovers: number;
+}): Record<string, string> {
+  return {
+    ...(result.provider ? { "X-Gateway-Provider": result.provider } : {}),
+    "X-Gateway-Failovers": String(result.failovers ?? 0),
+    ...corsHeaders(),
+  };
+}
+
 function errorBody(message: string, code: string | number | null = null): ApiErrorBody {
   return {
     error: {
@@ -106,7 +127,44 @@ function sessionKeyFor(
     .slice(0, 32);
 }
 
+/**
+ * Top-level guard: no exception from the handler may ever surface as a raw
+ * 500/HTML error — every failure path returns OpenAI-style error JSON.
+ */
 export async function POST(req: NextRequest) {
+  try {
+    return await handlePost(req);
+  } catch (e) {
+    console.error("Unhandled error in POST /v1/chat/completions:", e);
+    if (req.signal.aborted) {
+      return NextResponse.json(
+        {
+          error: {
+            message: "Request aborted",
+            type: "aborted",
+            param: null,
+            code: 499,
+          },
+        },
+        { status: 499, headers: corsHeaders() },
+      );
+    }
+    const message = e instanceof Error ? e.message : "Internal server error";
+    return NextResponse.json(
+      {
+        error: {
+          message: `Internal server error: ${message}`,
+          type: "server_error",
+          param: null,
+          code: "internal_error",
+        },
+      },
+      { status: 500, headers: corsHeaders() },
+    );
+  }
+}
+
+async function handlePost(req: NextRequest) {
   const auth = requireAuth(req);
   if (!auth.ok) {
     return new NextResponse(auth.response.body, {
@@ -165,8 +223,10 @@ export async function POST(req: NextRequest) {
       sessionKey,
     });
     if (!result.ok) {
-      const status = result.status === 429 ? 429 : 502;
-      return NextResponse.json(result.body, { status, headers: corsHeaders() });
+      return NextResponse.json(result.body, {
+        status: gatewayErrorStatus(result.status),
+        headers: gatewayErrorHeaders(result),
+      });
     }
     const response = new Response(result.start.stream, {
       status: 200,
@@ -236,8 +296,10 @@ export async function POST(req: NextRequest) {
       sessionKey,
     });
     if (!result.ok) {
-      const status = result.status === 429 ? 429 : 502;
-      return NextResponse.json(result.body, { status, headers: corsHeaders() });
+      return NextResponse.json(result.body, {
+        status: gatewayErrorStatus(result.status),
+        headers: gatewayErrorHeaders(result),
+      });
     }
     cacheSet(cacheKey, result.completion);
     return NextResponse.json(result.completion, {
@@ -268,8 +330,10 @@ export async function POST(req: NextRequest) {
     sessionKey,
   });
   if (!result.ok) {
-    const status = result.status === 429 ? 429 : 502;
-    return NextResponse.json(result.body, { status, headers: corsHeaders() });
+    return NextResponse.json(result.body, {
+      status: gatewayErrorStatus(result.status),
+      headers: gatewayErrorHeaders(result),
+    });
   }
   return NextResponse.json(result.completion, {
     status: 200,

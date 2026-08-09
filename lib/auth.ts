@@ -37,9 +37,12 @@ function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
   const bufA = enc.encode(a);
   const bufB = enc.encode(b);
-  if (bufA.length !== bufB.length) return false;
-  const max = Math.max(32, bufA.length);
-  let diff = 0;
+  // No early return on length mismatch: a length check short-circuits before
+  // the byte comparison and leaks whether the attacker's guess had the right
+  // length via timing. Instead the length difference is folded into `diff`, so
+  // every comparison runs the full fixed-iteration loop regardless of input.
+  const max = Math.max(32, bufA.length, bufB.length);
+  let diff = bufA.length ^ bufB.length;
   for (let i = 0; i < max; i++) {
     diff |= (bufA[i % bufA.length] ?? 0) ^ (bufB[i % bufB.length] ?? 0);
   }
@@ -50,7 +53,9 @@ function timingSafeEqual(a: string, b: string): boolean {
 export function detectClient(request: Request): string {
   const explicit = request.headers.get("x-client");
   if (explicit) return explicit.slice(0, 64);
-  const ua = request.headers.get("user-agent") ?? "";
+  // Lowercase before matching so casing differences (e.g. "Claude",
+  // "CURSOR", "OpenCode") never make a real client go undetected.
+  const ua = (request.headers.get("user-agent") ?? "").toLowerCase();
   if (ua.includes("claude")) return "claude-code";
   if (ua.includes("cursor")) return "cursor";
   if (ua.includes("aider")) return "aider";

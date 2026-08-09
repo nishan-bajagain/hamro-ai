@@ -1,6 +1,9 @@
 import type { ProviderConfig } from "@/lib/config";
 import { SITE_NAME } from "@/lib/config";
 import type { ChatCompletionRequest } from "@/lib/ai/types";
+import { SseParser } from "@/lib/ai/sse";
+
+export { SseParser };
 
 /**
  * Low-level provider client: builds headers, performs the upstream HTTP call
@@ -164,44 +167,6 @@ export function toProviderError(e: unknown): ProviderRequestError {
 
 /* ─────────────────────────── SSE parsing ──────────────────────────── */
 
-/**
- * Minimal, spec-compliant Server-Sent Events parser. Returns complete
- * `data:` payloads (multi-line joined). Ignores comments/other fields.
- */
-export class SseParser {
-  private buffer = "";
-  private dataLines: string[] = [];
+// SseParser lives in its own dependency-free module (lib/ai/sse.ts) so it can
+// be unit-tested directly; re-exported here for existing importers.
 
-  feed(chunk: Uint8Array): string[] {
-    const out: string[] = [];
-    this.buffer += new TextDecoder().decode(chunk, { stream: true });
-    while (true) {
-      const nl = this.buffer.indexOf("\n");
-      if (nl === -1) break;
-      let line = this.buffer.slice(0, nl);
-      this.buffer = this.buffer.slice(nl + 1);
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      if (line === "") {
-        if (this.dataLines.length) {
-          out.push(this.dataLines.join("\n"));
-          this.dataLines = [];
-        }
-        continue;
-      }
-      if (line.startsWith(":")) continue; // comment
-      const colon = line.indexOf(":");
-      const field = colon === -1 ? line : line.slice(0, colon).trim();
-      const value =
-        colon === -1 ? "" : line.slice(colon + 1).replace(/^ /, "");
-      if (field === "data") this.dataLines.push(value);
-    }
-    return out;
-  }
-
-  /** Flush any payload still in the buffer (stream ended without blank line). */
-  flush(): string[] {
-    const out = this.dataLines.length ? [this.dataLines.join("\n")] : [];
-    this.dataLines = [];
-    return out;
-  }
-}

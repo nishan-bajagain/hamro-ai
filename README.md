@@ -94,7 +94,10 @@ Every provider accepts an optional `<PROVIDER>_BASE_URL` override and a
 `<PROVIDER>_MODELS` comma-separated model-list override (e.g. `OLLAMA_MODELS`).
 `NEXT_PUBLIC_PUBLIC_API_KEY` can override the key the built-in playground uses in the
 browser. Set `DATA_FILE` to an absolute writable path if you want telemetry persisted
-somewhere other than `./data.json`. `RANDOM_SESSION_TTL_SECONDS` (default 3600) controls
+somewhere other than `./data.json`. On serverless hosts (e.g. Vercel) set
+`KV_REST_API_URL` + `KV_REST_API_TOKEN` from a free Vercel KV / Upstash store so
+`/status` telemetry survives cold starts (file storage there is ephemeral).
+`RANDOM_SESSION_TTL_SECONDS` (default 3600) controls
 how long a session keeps its randomly-picked model after last use.
 
 ## Using it with coding agents

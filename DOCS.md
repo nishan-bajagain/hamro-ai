@@ -454,13 +454,26 @@ vercel
 # set the env vars above in the Vercel dashboard (or `vercel env add`)
 ```
 
-Tips for serverless:
+**To keep `/status` data across cold starts on Vercel**, add a free
+[Vercel KV / Upstash Redis](https://vercel.com/docs/storage/vercel-kv) store
+and set its two env vars. The gateway then persists telemetry to the shared
+KV (via plain `fetch` — no extra dependencies), so data survives instance
+recycling and restarts:
+
+```env
+KV_REST_API_URL="https://your-kv.upstash.io"
+KV_REST_API_TOKEN="AUpX..."
+```
+
+Without KV:
 
 - Set `DATA_FILE` to a writable absolute path if you have a mounted volume
   (e.g. `/data/hamro-data.json`) to persist telemetry across cold starts.
-- Without a volume, `/status` still works — data just resets on cold restart.
-- OpenCode Zen and free OpenRouter models can be slow on first token
-  (5–20 s). Raise your platform's function timeout if you see `504`s.
+- Otherwise `/status` still works — data just resets when the instance
+  recycles (Vercel's `/tmp` is per-instance and ephemeral).
+
+OpenCode Zen and free OpenRouter models can be slow on first token
+(5–20 s). Raise your platform's function timeout if you see `504`s.
 
 ### VPS / Docker-friendly hosts
 
@@ -482,8 +495,9 @@ restarts. Back it up with the rest of the project.
 - **`data.json`** — all request logs + provider status (max 5,000 recent
   records; oldest pruned). Plain JSON, no database engine.
 
-Storage resolution order: `DATA_FILE` env → `./data.json` → `/tmp/hamro-data.json`
-→ in-memory fallback.
+Storage resolution order: shared **KV** (`KV_REST_API_URL` + `KV_REST_API_TOKEN`,
+optional — the only layer that survives across serverless instances) →
+`DATA_FILE` env → `./data.json` → `/tmp/hamro-data.json` → in-memory fallback.
 
 ---
 
@@ -508,7 +522,7 @@ Storage resolution order: `DATA_FILE` env → `./data.json` → `/tmp/hamro-data
 | Slow first token on OpenCode models | Normal for free reasoning models (5–20 s). Streaming shows partial reasoning as it arrives. |
 | `502 All providers failed` | Check each provider key in `.env` and run `POST /api/healthcheck`; look at `/status` for the failing provider's error. |
 | `429 rate limit exceeded` | You exceeded `RATE_LIMIT_RPM` — check the `Retry-After` header and back off, or raise the limit. |
-| `/status` resets on deploy | Serverless in-memory fallback — set `DATA_FILE` to a persistent volume. |
+| `/status` resets on deploy | Vercel instances are ephemeral — add a free Vercel KV / Upstash store and set `KV_REST_API_URL` + `KV_REST_API_TOKEN` (or mount a volume via `DATA_FILE`). |
 | Claude Code won't connect | Claude Code needs Anthropic protocol — use CCR (see [Claude Code](#claude-code)). |
 
 ---

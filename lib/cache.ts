@@ -23,6 +23,10 @@ interface CacheEntry<T> {
   expiresAt: number;
 }
 
+// In-memory, per-process state — safe under concurrency within one Node
+// process (single-threaded, synchronous read-modify-writes), but each
+// instance of a multi-instance deployment keeps its own copy. See the
+// concurrency note in lib/ai/router.ts.
 const cache = new Map<string, CacheEntry<unknown>>();
 
 export function cacheGet<T>(key: string): T | undefined {

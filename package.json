@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node scripts/verify-sse.mjs",
+    "test:api": "node scripts/verify-api.mjs",
+    "test:store": "node scripts/verify-store.mjs"
   },
   "dependencies": {
     "highlight.js": "^11.11.1",

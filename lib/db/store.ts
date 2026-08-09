@@ -1,15 +1,21 @@
 /**
- * JSON-file-backed telemetry store.
+ * JSON-file-backed telemetry store with an optional shared KV layer.
  *
  * Replaces Prisma/SQLite so the gateway runs anywhere — a laptop, a VPS, or a
  * serverless host (Vercel, Netlify…) with zero database setup.
  *
- * How persistence works:
- *   1. The store picks the first *writable* location in this order:
- *        DATA_FILE env var  →  <project>/data.json  →  /tmp/hamro-data.json
- *   2. On hosts with a read-only filesystem (serverless) it transparently
- *      falls back to in-memory storage, so the gateway keeps working — the
- *      only cost is that telemetry does not survive a cold restart.
+ * How persistence works (best available wins):
+ *   1. **Vercel KV / Upstash Redis** (optional) — when `KV_REST_API_URL` and
+ *      `KV_REST_API_TOKEN` are set, telemetry is also written to the shared
+ *      key-value store. This is the only backend that survives across
+ *      serverless *instances*, so it's what makes `/status` show data on
+ *      Vercel (each instance's filesystem, incl. `/tmp`, is ephemeral).
+ *      Implemented with plain `fetch` — no client dependency.
+ *   2. `DATA_FILE` env var — a real writable volume (e.g. a mounted disk).
+ *   3. `<project>/data.json` — local dev / VPS.
+ *   4. `/tmp/hamro-data.json` — serverless hosts; per-instance, ephemeral.
+ *   5. In-memory only — the gateway keeps working, telemetry just does not
+ *      survive a restart.
  *
  * All mutation helpers are fire-and-forget safe: they update memory first,
  * then persist asynchronously (debounced + serialized) and never throw.
@@ -70,15 +76,45 @@ function nextId(): string {
     .slice(2, 6)}`;
 }
 
+/* ───────────────────── Optional KV (Upstash REST) ─────────────────── */
+
+const KV_URL = process.env.KV_REST_API_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+const KV_KEY = "hamro:telemetry";
+
+/** Read the shared snapshot from KV, or null when unavailable/empty. */
+async function kvGet(): Promise<StoreData | null> {
+  if (!KV_URL || !KV_TOKEN) return null;
+  try {
+    const res = await fetch(`${KV_URL}/${KV_KEY}`, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { result?: string };
+    if (typeof body.result !== "string" || !body.result) return null;
+    return deserialize(body.result);
+  } catch {
+    // KV unreachable — fall back to file / memory.
+    return null;
+  }
+}
+
+/** Write the snapshot string to KV. Throws on failure (caller handles). */
+async function kvSet(snapshot: string): Promise<void> {
+  if (!KV_URL || !KV_TOKEN) return;
+  const res = await fetch(`${KV_URL}/${KV_KEY}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${KV_TOKEN}` },
+    body: snapshot,
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!res.ok) throw new Error(`KV write failed: HTTP ${res.status}`);
+}
+
 /* ────────────────────────── File resolution ───────────────────────── */
 
-const CANDIDATE_PATHS = (): string[] => {
-  const paths: string[] = [];
-  if (process.env.DATA_FILE) paths.push(process.env.DATA_FILE);
-  paths.push(path.join(process.cwd(), "data.json"));
-  paths.push("/tmp/hamro-data.json");
-  return paths;
-};
+const IS_VERCEL = process.env.VERCEL === "1";
 
 async function isWritable(file: string): Promise<boolean> {
   try {
@@ -102,7 +138,17 @@ async function isWritable(file: string): Promise<boolean> {
 }
 
 async function pickWritablePath(): Promise<string | null> {
-  for (const file of CANDIDATE_PATHS()) {
+  // An explicit DATA_FILE (mounted volume) is always tried first.
+  if (process.env.DATA_FILE) {
+    return (await isWritable(process.env.DATA_FILE)) ? process.env.DATA_FILE : null;
+  }
+  // On Vercel the project directory is read-only, so probing <cwd>/data.json
+  // just wastes a cold-start write attempt; go straight to /tmp (which is
+  // per-instance and ephemeral — KV is the durable layer there).
+  const candidates = IS_VERCEL
+    ? ["/tmp/hamro-data.json"]
+    : [path.join(process.cwd(), "data.json"), "/tmp/hamro-data.json"];
+  for (const file of candidates) {
     try {
       await fs.access(path.dirname(file));
       if (await isWritable(file)) return file;
@@ -149,21 +195,42 @@ function deserialize(raw: string): StoreData {
 class JsonStore {
   private data: StoreData = emptyData();
   private file: string | null = null;
-  private loaded = false;
+  /** Single shared init promise so concurrent first calls never race. */
+  private initPromise: Promise<void> | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
   private writeChain: Promise<void> = Promise.resolve();
   private warned = false;
 
-  /** Lazily load existing data from disk once. */
-  private async ensureLoaded(): Promise<void> {
-    if (this.loaded) return;
-    this.loaded = true;
+  /**
+   * Lazily initialize once. The promise is stored so parallel first requests
+   * (a cold-start burst) all await the SAME probe — otherwise `file` could be
+   * assigned after a concurrent caller already skipped persistence.
+   */
+  private ensureLoaded(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.init();
+    }
+    return this.initPromise;
+  }
+
+  private async init(): Promise<void> {
+    // 1. Shared KV snapshot (Vercel KV / Upstash) — survives across instances.
+    if (KV_URL && KV_TOKEN) {
+      const kvData = await kvGet();
+      if (kvData) {
+        this.data = kvData;
+        // Keep a per-instance file too, as a warm cache / offline fallback.
+        this.file = await pickWritablePath();
+        return;
+      }
+    }
+    // 2. Writable file (volume → project data.json → /tmp).
     this.file = await pickWritablePath();
     if (!this.file) {
       if (!this.warned) {
         console.warn(
-          "[store] no writable filesystem detected — telemetry kept in memory only " +
-            "(expected on serverless hosts; set DATA_FILE to a writable path to persist).",
+          "[store] no persistent storage found (KV not configured, no writable filesystem) — " +
+            "telemetry kept in memory only (expected on serverless hosts without KV).",
         );
         this.warned = true;
       }
@@ -182,15 +249,18 @@ class JsonStore {
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      if (!this.file) return;
+      if (!this.file && !(KV_URL && KV_TOKEN)) return;
       const snapshot = JSON.stringify(this.data);
       this.writeChain = this.writeChain
         .then(async () => {
-          await fs.writeFile(this.file as string, snapshot, "utf8");
+          const writes: Promise<unknown>[] = [];
+          if (this.file) writes.push(fs.writeFile(this.file as string, snapshot, "utf8"));
+          if (KV_URL && KV_TOKEN) writes.push(kvSet(snapshot));
+          await Promise.all(writes);
         })
         .catch((e) => {
-          // Filesystem became unwritable (e.g. host switched to read-only):
-          // downgrade to memory-only and keep serving.
+          // Backend became unreachable (read-only FS, KV outage): keep serving
+          // from memory and stop warning repeatedly.
           if (!this.warned) {
             console.warn("[store] persist failed, keeping telemetry in memory:", e?.message ?? e);
             this.warned = true;
