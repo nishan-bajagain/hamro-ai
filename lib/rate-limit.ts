@@ -22,6 +22,15 @@ export const RATE_LIMIT_RPM = configuredRpm();
 const buckets = new Map<string, number[]>();
 let lastSweep = Date.now();
 
+// Periodic cleanup to prevent memory leaks when no requests come in
+if (typeof setInterval === "function") {
+  setInterval(() => {
+    const now = Date.now();
+    sweep(now);
+    lastSweep = now;
+  }, WINDOW_MS).unref?.();
+}
+
 function sweep(now: number): void {
   for (const [key, hits] of buckets) {
     const kept = hits.filter((t) => now - t < WINDOW_MS);

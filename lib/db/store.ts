@@ -6,10 +6,14 @@
  *
  * How persistence works (best available wins — every layer that is available
  * is written, and reads prefer the most durable one):
- *   1. **Vercel KV / Upstash Redis** (optional) — when `KV_REST_API_URL` and
+ *   1. **MongoDB** (optional, recommended) — when `MONGODB_URI` is set, the
+ *      full snapshot (telemetry + chats) is mirrored to a single MongoDB
+ *      document and is preferred when loading. Survives serverless cold
+ *      starts; no blob-size or expiry limits.
+ *   2. **Vercel KV / Upstash Redis** (optional) — when `KV_REST_API_URL` and
  *      `KV_REST_API_TOKEN` are set, telemetry is also written to the shared
  *      key-value store. Implemented with plain `fetch` — no client dependency.
- *   2. **Remote JSON mirror** (optional, free, no account) — when
+ *   3. **Remote JSON mirror** (optional, free, no account) — when
  *      `REMOTE_JSON_URL` is set, the snapshot is mirrored to any JSON endpoint
  *      that speaks GET/PUT (jsonblob.com, a gist-backed API, your own server…).
  *      Without `REMOTE_JSON_URL` the gateway auto-creates a free
@@ -17,10 +21,10 @@
  *      `meta`, reuses it across restarts, and self-heals when the blob expires
  *      (~24h rolling window on the free tier — see README). This is what keeps
  *      `/status` alive across serverless cold starts with zero setup.
- *   3. `DATA_FILE` env var — a real writable volume (e.g. a mounted disk).
- *   4. `<project>/data.json` — local dev / VPS.
- *   5. `/tmp/hamro-data.json` — serverless hosts; per-instance, ephemeral.
- *   6. In-memory only — the gateway keeps working, telemetry just does not
+ *   4. `DATA_FILE` env var — a real writable volume (e.g. a mounted disk).
+ *   5. `<project>/data.json` — local dev / VPS.
+ *   6. `/tmp/hamro-data.json` — serverless hosts; per-instance, ephemeral.
+ *   7. In-memory only — the gateway keeps working, telemetry just does not
  *      survive a restart.
  *
  * All mutation helpers are fire-and-forget safe: they update memory first,
@@ -30,6 +34,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
+import { mongoConfigured, mongoGet, mongoSet } from "./mongo.ts";
 
 export interface StoredRequest {
   id: string;
@@ -494,6 +499,14 @@ class JsonStore {
   private lastRemoteWriteAt = 0;
   private static REMOTE_WRITE_INTERVAL_MS = 10_000;
 
+  /** Log a warning once (per process) so flaky backends don't spam. */
+  private warnOnce(message: string): void {
+    if (!this.warned) {
+      console.warn(message);
+      this.warned = true;
+    }
+  }
+
   /**
    * Lazily initialize once. The promise is stored so parallel first requests
    * (a cold-start burst) all await the SAME probe — otherwise `file` could be
@@ -507,7 +520,18 @@ class JsonStore {
   }
 
   private async init(): Promise<void> {
-    // 1. Shared KV snapshot (Vercel KV / Upstash) — most durable when set.
+    // 0. MongoDB — most durable shared layer when configured (survives
+    //    serverless cold starts, no size/expiry limits).
+    if (mongoConfigured()) {
+      const mongoData = await mongoGet();
+      if (mongoData) {
+        this.data = deserialize(mongoData);
+        // Keep a per-instance file too, as a warm cache / offline fallback.
+        this.file = await pickWritablePath();
+        return;
+      }
+    }
+    // 1. Shared KV snapshot (Vercel KV / Upstash) — next most durable.
     if (KV_URL && KV_TOKEN) {
       const kvData = await kvGet();
       if (kvData) {
@@ -570,25 +594,46 @@ class JsonStore {
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      if (!this.file && !(KV_URL && KV_TOKEN) && !REMOTE_JSON_URL && !this.data.meta.remoteUrl) {
+      if (
+        !this.file &&
+        !(KV_URL && KV_TOKEN) &&
+        !mongoConfigured() &&
+        !REMOTE_JSON_URL &&
+        !this.data.meta.remoteUrl
+      ) {
         return;
       }
       const snapshot = JSON.stringify(this.data);
       this.writeChain = this.writeChain
         .then(async () => {
+          // Every layer is written independently — a MongoDB / KV / remote
+          // outage must never block the file write (the file is the primary
+          // local source of truth). Each optional layer swallows its own
+          // errors so `Promise.all` cannot reject.
           const writes: Promise<unknown>[] = [];
-          if (this.file) writes.push(writeFileAtomic(this.file as string, snapshot));
-          if (KV_URL && KV_TOKEN) writes.push(kvSet(snapshot));
-          await this.persistRemote();
+          if (this.file)
+            writes.push(
+              writeFileAtomic(this.file as string, snapshot).catch((e) => {
+                this.warnOnce(`[store] file write failed: ${e?.message ?? e}`);
+              }),
+            );
+          if (mongoConfigured())
+            writes.push(
+              mongoSet(snapshot).catch((e) => {
+                this.warnOnce(`[store] MongoDB write failed: ${e?.message ?? e}`);
+              }),
+            );
+          if (KV_URL && KV_TOKEN)
+            writes.push(
+              kvSet(snapshot).catch((e) => {
+                this.warnOnce(`[store] KV write failed: ${e?.message ?? e}`);
+              }),
+            );
           await Promise.all(writes);
+          await this.persistRemote();
         })
         .catch((e) => {
-          // Backend became unreachable (read-only FS, KV/remote outage): keep
-          // serving from memory and stop warning repeatedly.
-          if (!this.warned) {
-            console.warn("[store] persist failed, keeping telemetry in memory:", e?.message ?? e);
-            this.warned = true;
-          }
+          this.warnOnce(`[store] persist failed: ${e?.message ?? e}`);
         });
     }, PERSIST_DEBOUNCE_MS);
   }

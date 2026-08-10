@@ -233,7 +233,8 @@ usage, recent event log. Public (no auth).
 `200` — `{ updatedAt, summary, perModel, perProvider, recent }`
 
 ### Used by
-The status page (`/status`). Persisted to `data.json` (+ optional Vercel KV).
+The status page (`/status`). Persisted to `data.json`, mirrored to MongoDB
+when `MONGODB_URI` is set, and to KV / free remote JSON where configured.
 
 ---
 
@@ -283,10 +284,11 @@ See `.env.example`. Frontend-relevant:
 - `PUBLIC_API_KEY`, provider keys (`GROQ_API_KEY`, …), `RATE_LIMIT_RPM`,
   `CACHE_TTL_SECONDS`, `MODEL_FALLBACK_CHAIN`,
   `RANDOM_SESSION_TTL_SECONDS`.
-- Telemetry persistence: **free remote-JSON auto-mode** (jsonblob.com blob,
-  zero setup, ~24h rolling window) — nothing to set; `REMOTE_JSON_URL` for a
-  durable endpoint, or `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Upstash) for
-  permanent serverless persistence.
+- Telemetry persistence (all data — status, usage, chats): **MongoDB** when
+  `MONGODB_URI` is set (recommended on serverless — no size/expiry limits),
+  otherwise **free remote-JSON auto-mode** (jsonblob.com blob, zero setup,
+  ~24h rolling window) — nothing to set; `REMOTE_JSON_URL` for a durable
+  endpoint, or `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Upstash) as well.
 
 ## Using Hamro AI from coding agents
 
@@ -306,3 +308,12 @@ npm run build               # or npm run dev
 npm start                   # http://localhost:3000
 npm run lint && npx tsc --noEmit
 ```
+
+## Providers (12)
+
+Groq · OpenRouter · OpenCode Zen · Ollama Cloud · Naga AI · ZenMux · LLM7 ·
+Cerebras · Chutes · HuggingFace · **Mistral AI** (free tier:
+`mistral-small-latest`, `ministral-3b-latest`, `ministral-8b-latest`,
+`codestral-latest`, `open-mistral-7b`, `open-mixtral-8x7b`) · **Z.ai**
+(`glm-4.5-flash` — the only free model on the key; the others require paid
+balance). Provider keys live in `.env` (`MISTRAL_API_KEY`, `ZAI_API_KEY`).

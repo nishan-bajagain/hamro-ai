@@ -29,8 +29,18 @@ export async function POST() {
         // Try several models (not just the first) — a rate-limited or
         // quota-blocked model must not mislabel a provider that still works.
         const candidates = p.models.slice(0, MAX_PROBE_MODELS);
+        if (candidates.length === 0) {
+          await setProviderStatus(p.id, "degraded", null, "", "no models configured");
+          return {
+            provider: p.id,
+            status: "degraded",
+            latencyMs: null,
+            model: "",
+            error: "no models configured",
+          };
+        }
         let lastError: string | null = null;
-        let lastModel: string = candidates[0]?.id ?? "";
+        let lastModel: string = candidates[0].id;
         for (const model of candidates) {
           const started = Date.now();
           try {

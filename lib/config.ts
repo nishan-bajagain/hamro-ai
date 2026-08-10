@@ -13,7 +13,9 @@ export type ProviderId =
   | "llm7"
   | "cerebras"
   | "chutes"
-  | "huggingface";
+  | "huggingface"
+  | "mistral"
+  | "zai";
 
 export const PROVIDER_IDS: ProviderId[] = [
   "groq",
@@ -26,6 +28,8 @@ export const PROVIDER_IDS: ProviderId[] = [
   "cerebras",
   "chutes",
   "huggingface",
+  "mistral",
+  "zai",
 ];
 
 export interface CatalogModel {
@@ -468,6 +472,63 @@ const HUGGINGFACE_DEFAULT_MODELS: CatalogModel[] = [
   },
 ];
 
+/** Mistral — free-tier chat models verified against the account key. */
+const MISTRAL_DEFAULT_MODELS: CatalogModel[] = [
+  {
+    id: "mistral-small-latest",
+    name: "Mistral Small (free)",
+    context: 32768,
+    inputPrice: 0,
+    outputPrice: 0,
+  },
+  {
+    id: "ministral-3b-latest",
+    name: "Ministral 3B (free)",
+    context: 131072,
+    inputPrice: 0,
+    outputPrice: 0,
+  },
+  {
+    id: "ministral-8b-latest",
+    name: "Ministral 8B (free)",
+    context: 131072,
+    inputPrice: 0,
+    outputPrice: 0,
+  },
+  {
+    id: "codestral-latest",
+    name: "Codestral (free, coding)",
+    context: 32768,
+    inputPrice: 0,
+    outputPrice: 0,
+  },
+  {
+    id: "open-mistral-7b",
+    name: "Open Mistral 7B (free)",
+    context: 32768,
+    inputPrice: 0,
+    outputPrice: 0,
+  },
+  {
+    id: "open-mixtral-8x7b",
+    name: "Open Mixtral 8x7B (free)",
+    context: 32768,
+    inputPrice: 0,
+    outputPrice: 0,
+  },
+];
+
+/** Z.ai (GLM) — free model verified against the account key (others need balance). */
+const ZAI_DEFAULT_MODELS: CatalogModel[] = [
+  {
+    id: "glm-4.5-flash",
+    name: "GLM 4.5 Flash (free)",
+    context: 131072,
+    inputPrice: 0,
+    outputPrice: 0,
+  },
+];
+
 /* ──────────────────────────── Helpers ─────────────────────────────── */
 
 function csv(value: string | undefined): string[] | null {
@@ -583,6 +644,22 @@ function buildProviders(): ProviderConfig[] {
       models: pickModels(HUGGINGFACE_DEFAULT_MODELS, "HUGGINGFACE_MODELS"),
       homeUrl: "https://huggingface.co",
     },
+    {
+      id: "mistral",
+      label: "Mistral AI",
+      baseUrl: process.env.MISTRAL_BASE_URL ?? "https://api.mistral.ai/v1",
+      apiKey: process.env.MISTRAL_API_KEY ?? "",
+      models: pickModels(MISTRAL_DEFAULT_MODELS, "MISTRAL_MODELS"),
+      homeUrl: "https://mistral.ai",
+    },
+    {
+      id: "zai",
+      label: "Z.ai (GLM)",
+      baseUrl: process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4",
+      apiKey: process.env.ZAI_API_KEY ?? "",
+      models: pickModels(ZAI_DEFAULT_MODELS, "ZAI_MODELS"),
+      homeUrl: "https://z.ai",
+    },
   ];
   return providers.filter((p) => p.models.length > 0);
 }
@@ -632,6 +709,8 @@ export function parseFallbackChain(): { provider: ProviderId; model: string }[] 
     },
     { provider: "opencode" as ProviderId, model: "nemotron-3-ultra-free" },
     { provider: "opencode" as ProviderId, model: "deepseek-v4-flash-free" },
+    { provider: "mistral" as ProviderId, model: "mistral-small-latest" },
+    { provider: "zai" as ProviderId, model: "glm-4.5-flash" },
   ];
   if (!raw) return defaults;
   const entries = raw

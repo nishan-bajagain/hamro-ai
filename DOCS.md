@@ -1,9 +1,9 @@
 # hamro.site — Free AI Gateway · Full Documentation
 
 A single, OpenAI-compatible API that gives you **free access to multiple frontier
-models** through one key and one URL. It aggregates ten providers — **Groq**,
+models** through one key and one URL. It aggregates twelve providers — **Groq**,
 **OpenRouter**, **OpenCode Zen**, **Ollama Cloud**, **Naga AI**, **ZenMux**, **LLM7**,
-**Cerebras**, **Chutes** and **HuggingFace** — into a smart routing layer with
+**Cerebras**, **Chutes**, **HuggingFace**, **Mistral AI** and **Z.ai** — into a smart routing layer with
 automatic failover, so coding agents (Claude Code, Cursor, Aider, OpenCode, custom
 CLIs) never see a broken connection.
 
@@ -75,6 +75,10 @@ highlights:
 | `cerebras/zai-glm-4.7` | Cerebras | 131k | GLM 4.7 on Cerebras |
 | `openrouter/openrouter/free` | OpenRouter | 200k | Auto-routes to OpenRouter's best free model |
 | `opencode/deepseek-v4-flash-free` | OpenCode Zen | 131k | DeepSeek V4 Flash, free, shows reasoning |
+| `mistral/mistral-small-latest` | Mistral AI | 32k | Mistral Small, free tier |
+| `mistral/ministral-8b-latest` | Mistral AI | 131k | Ministral 8B, free tier |
+| `mistral/codestral-latest` | Mistral AI | 32k | Codestral, free coding model |
+| `zai/glm-4.5-flash` | Z.ai | 131k | GLM 4.5 Flash, free |
 | `random` | any | — | **Picks a random model, pinned per session** (see below) |
 
 You can also pass a **bare model id** (`llama-3.3-70b-versatile`) — the router
@@ -471,6 +475,8 @@ need your own (all free):
 | **Cerebras** | https://cloud.cerebras.ai | Free tier models (`zai-glm-4.7`, …) |
 | **Chutes** | https://chutes.ai | TEE-hosted open models |
 | **HuggingFace** | https://huggingface.co/settings/tokens | Free inference with monthly credits |
+| **Mistral AI** | https://console.mistral.ai | Free tier (`mistral-small-latest`, `ministral-*`, `codestral-latest`) |
+| **Z.ai** | https://z.ai | Free flash models (`glm-4.5-flash`) |
 
 Copy them into `.env` (see `.env.example` for the full template):
 
@@ -487,7 +493,9 @@ LLM7_API_KEY="..."
 CEREBRAS_API_KEY="csk-..."
 CHUTES_API_KEY="cpk_..."
 HUGGINGFACE_API_KEY="hf_..."
-MODEL_FALLBACK_CHAIN="groq/llama-3.3-70b-versatile,ollama/nemotron-3-ultra,naga/nemotron-3-ultra-550b-a55b:free,llm7/gpt-oss:20b,huggingface/meta-llama/Llama-3.3-70B-Instruct,openrouter/nvidia/nemotron-3-ultra-550b-a55b:free,zenmux/deepseek/deepseek-v4-flash-free,cerebras/zai-glm-4.7,chutes/deepseek-ai/DeepSeek-V4-Flash-0731-TEE,opencode/nemotron-3-ultra-free,opencode/deepseek-v4-flash-free"
+MISTRAL_API_KEY="..."   # console.mistral.ai
+ZAI_API_KEY="..."       # Z.ai GLM
+MODEL_FALLBACK_CHAIN="groq/llama-3.3-70b-versatile,ollama/nemotron-3-ultra,naga/nemotron-3-ultra-550b-a55b:free,llm7/gpt-oss:20b,huggingface/meta-llama/Llama-3.3-70B-Instruct,openrouter/nvidia/nemotron-3-ultra-550b-a55b:free,zenmux/deepseek/deepseek-v4-flash-free,cerebras/zai-glm-4.7,chutes/deepseek-ai/DeepSeek-V4-Flash-0731-TEE,opencode/nemotron-3-ultra-free,opencode/deepseek-v4-flash-free,mistral/mistral-small-latest,zai/glm-4.5-flash"
 ```
 
 ---
@@ -514,8 +522,18 @@ vercel
 # set the env vars above in the Vercel dashboard (or `vercel env add`)
 ```
 
-**To keep `/status` data across cold starts on Vercel**, two free options
-(no database, no signup for the first one):
+**To keep `/status` and chat history across cold starts on Vercel**, use one
+of these options (no signup needed for the first two):
+
+**Option 0 — MongoDB (recommended).** Set `MONGODB_URI` to any MongoDB
+connection string (free Atlas M0 clusters work great) and the full snapshot —
+telemetry *and* chat history — is mirrored to a single document. No blob-size
+or expiry limits, survives every cold start:
+
+```env
+MONGODB_URI="mongodb+srv://user:pass@cluster.mongodb.net/?appName=..."
+MONGODB_DB="hamro"   # optional, default: hamro
+```
 
 **Option 1 — free remote JSON (zero setup).** The gateway auto-creates a free
 [jsonblob.com](https://jsonblob.com) blob on first write, remembers its URL in
@@ -575,9 +593,12 @@ restarts. Back it up with the rest of the project.
   records; oldest pruned) **plus the chat-history database** (`chats` section,
   namespaced per key). Plain JSON, no database engine.
 
-Storage resolution order: shared **KV** (`KV_REST_API_URL` + `KV_REST_API_TOKEN`,
-optional — the only layer that survives across serverless instances) →
-`DATA_FILE` env → `./data.json` → `/tmp/hamro-data.json` → in-memory fallback.
+Storage resolution order: shared **MongoDB** (`MONGODB_URI`, optional —
+recommended; survives across serverless instances with no size/expiry limits)
+→ shared **KV** (`KV_REST_API_URL` + `KV_REST_API_TOKEN`, optional) → free
+**remote-JSON mirror** (jsonblob auto-mode, optional) → `DATA_FILE` env →
+`./data.json` → `/tmp/hamro-data.json` → in-memory fallback. Every layer that
+is available is written, so the most durable one always has the latest data.
 
 ---
 
@@ -602,7 +623,7 @@ optional — the only layer that survives across serverless instances) →
 | Slow first token on OpenCode models | Normal for free reasoning models (5–20 s). Streaming shows partial reasoning as it arrives. |
 | `502 All providers failed` | Check each provider key in `.env` and run `POST /api/healthcheck`; look at `/status` for the failing provider's error. |
 | `429 rate limit exceeded` | You exceeded `RATE_LIMIT_RPM` — check the `Retry-After` header and back off, or raise the limit. |
-| `/status` resets on deploy | Vercel instances are ephemeral — add a free Vercel KV / Upstash store and set `KV_REST_API_URL` + `KV_REST_API_TOKEN` (or mount a volume via `DATA_FILE`). |
+| `/status` resets on deploy | Vercel instances are ephemeral — set `MONGODB_URI` (recommended), or add a free Vercel KV / Upstash store with `KV_REST_API_URL` + `KV_REST_API_TOKEN`, or mount a volume via `DATA_FILE`. |
 | Claude Code won't connect | The gateway speaks Anthropic natively — run `npm run claude -- --check` and confirm the gateway is up on port 3000 (see [Claude Code](#claude-code)). |
 
 ---

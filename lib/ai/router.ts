@@ -179,7 +179,8 @@ export function resolveRandomPin(
   if (existing && randomPinAlive(existing)) {
     existing.lastUsed = Date.now();
     const p = getProvider(existing.provider);
-    return p ? { provider: p, model: existing.model } : null;
+    // Ensure the provider still has an API key configured
+    if (p && p.apiKey) return { provider: p, model: existing.model };
   }
 
   const pool: ChainEntry[] = [];

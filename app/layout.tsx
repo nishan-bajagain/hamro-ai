@@ -22,7 +22,7 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "Hamro AI — AI, Made Simple",
   description:
-    "Free, open-access AI chat and gateway. One public key, dozens of free models across ten providers, automatic failover — for people and for coding agents.",
+    "Free, open-access AI chat and gateway. One public key, dozens of free models across twelve providers, automatic failover — for people and for coding agents.",
   metadataBase: new URL("https://hamro.site"),
   applicationName: "Hamro AI",
   icons: {
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
     card: "summary",
     title: "Hamro AI — AI, Made Simple",
     description:
-      "Free AI chat and gateway with automatic failover across ten providers.",
+      "Free AI chat and gateway with automatic failover across twelve providers.",
   },
 };
 

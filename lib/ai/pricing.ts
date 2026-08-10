@@ -32,6 +32,8 @@ export const PRICING: Record<string, { input: number; output: number }> = {
   "cerebras/*": { input: 0, output: 0 },
   "chutes/*": { input: 0, output: 0 },
   "huggingface/*": { input: 0, output: 0 },
+  "mistral/*": { input: 0, output: 0 },
+  "zai/*": { input: 0, output: 0 },
 
   // Sensible default for anything else
   "*": { input: 1.0, output: 3.0 },

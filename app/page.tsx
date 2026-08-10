@@ -44,7 +44,7 @@ export default function Home() {
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-muted sm:text-lg">
               Hamro AI is a free AI chat and gateway — one public key, dozens of
-              free models across ten providers, routed with automatic failover.
+              free models across twelve providers, routed with automatic failover.
               Ask questions, write code, or point your coding agent at it.
             </p>
 

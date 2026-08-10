@@ -1,11 +1,12 @@
 # hamro.site — Free AI Gateway
 
 A high-performance, **open-access AI Gateway** built with Next.js (App Router) + TypeScript.
-It exposes a single **OpenAI-compatible REST API** (`/v1/*`) that aggregates ten LLM
+It exposes a single **OpenAI-compatible REST API** (`/v1/*`) that aggregates twelve LLM
 providers (Groq, OpenRouter, OpenCode Zen, Ollama Cloud, Naga AI, ZenMux, LLM7,
-Cerebras, Chutes and HuggingFace) behind one public API key, with smart routing,
-automatic failover, streaming, token accounting and a live status dashboard — free for
-coding agents like Claude Code, Cursor, Aider and custom CLI extensions.
+Cerebras, Chutes, HuggingFace, Mistral AI and Z.ai) behind one public API key, with
+smart routing, automatic failover, streaming, token accounting and a live status
+dashboard — free for coding agents like Claude Code, Cursor, Aider and custom CLI
+extensions.
 
 > **📖 Full documentation** — API reference, free-access guide, and step-by-step setup
 > for Claude Code, Cursor, Aider and other agents: **[DOCS.md](DOCS.md)**.
@@ -26,10 +27,10 @@ coding agents like Claude Code, Cursor, Aider and custom CLI extensions.
 - **Agent-tuned streaming** — SSE chunks, `tool_calls` deltas and reasoning content pass
   through verbatim (only the `model` field is rewritten); `stream_options.include_usage`
   is requested where supported.
-- **Telemetry, no database** — every call is logged (tokens, cost from standard pricing
-  tables, latency, TTFT, failovers, client) to a plain **`data.json`** file, mirrored to a
-  free remote JSON blob (jsonblob auto-mode) so it survives serverless cold starts, and
-  shown on `/status`.
+- **Telemetry, no database setup** — every call is logged (tokens, cost from standard
+  pricing tables, latency, TTFT, failovers, client) to a plain **`data.json`** file,
+  mirrored to **MongoDB** when `MONGODB_URI` is set (recommended on serverless) and/or a
+  free remote JSON blob (jsonblob auto-mode), and shown on `/status`.
 - **Chat database in `data.json`** — the web client saves its chat history to the
   gateway's own database via the auth-protected `/api/chats` API (no online JSON-blob
   services; `localStorage` is only an offline cache). Per-key namespacing and size caps
@@ -60,6 +61,8 @@ coding agents like Claude Code, Cursor, Aider and custom CLI extensions.
 | Cerebras   | `zai-glm-4.7`, `gpt-oss-120b`, `gemma-4-31b` | free |
 | Chutes     | `deepseek-ai/DeepSeek-V4-Flash-0731-TEE`, `Qwen/Qwen3-235B-A22B-Thinking-2507-TEE`, `zai-org/GLM-5.2-TEE`, `moonshotai/Kimi-K2.6-TEE`, and more | free |
 | HuggingFace| `meta-llama/Llama-3.3-70B-Instruct`, `deepseek-ai/DeepSeek-V4-Flash`, `zai-org/GLM-5.2`, `moonshotai/Kimi-K3`, `Qwen/Qwen3-Coder-480B-A35B-Instruct`, and more | free |
+| Mistral AI | `mistral-small-latest`, `ministral-3b-latest`, `ministral-8b-latest`, `codestral-latest`, `open-mistral-7b`, `open-mixtral-8x7b` | free |
+| Z.ai       | `glm-4.5-flash` | free |
 
 There is also a virtual **`random`** model — the gateway picks one of the above at
 random per session (see Highlights). Model ids are provider-prefixed
@@ -94,8 +97,13 @@ LLM7_API_KEY="..."              # LLM7
 CEREBRAS_API_KEY="csk-..."      # Cerebras
 CHUTES_API_KEY="cpk_..."        # Chutes
 HUGGINGFACE_API_KEY="hf_..."    # HuggingFace router
+MISTRAL_API_KEY="..."           # Mistral AI (console.mistral.ai)
+ZAI_API_KEY="..."               # Z.ai GLM
 
-MODEL_FALLBACK_CHAIN="groq/llama-3.3-70b-versatile,ollama/nemotron-3-ultra,naga/nemotron-3-ultra-550b-a55b:free,llm7/gpt-oss:20b,huggingface/meta-llama/Llama-3.3-70B-Instruct,openrouter/nvidia/nemotron-3-ultra-550b-a55b:free,zenmux/deepseek/deepseek-v4-flash-free,cerebras/zai-glm-4.7,chutes/deepseek-ai/DeepSeek-V4-Flash-0731-TEE,opencode/nemotron-3-ultra-free,opencode/deepseek-v4-flash-free"
+# Durable telemetry + chat storage (optional, recommended on Vercel)
+MONGODB_URI="mongodb+srv://user:pass@cluster.mongodb.net/?appName=..."
+
+MODEL_FALLBACK_CHAIN="groq/llama-3.3-70b-versatile,ollama/nemotron-3-ultra,naga/nemotron-3-ultra-550b-a55b:free,llm7/gpt-oss:20b,huggingface/meta-llama/Llama-3.3-70B-Instruct,openrouter/nvidia/nemotron-3-ultra-550b-a55b:free,zenmux/deepseek/deepseek-v4-flash-free,cerebras/zai-glm-4.7,chutes/deepseek-ai/DeepSeek-V4-Flash-0731-TEE,opencode/nemotron-3-ultra-free,opencode/deepseek-v4-flash-free,mistral/mistral-small-latest,zai/glm-4.5-flash"
 ```
 
 Every provider accepts an optional `<PROVIDER>_BASE_URL` override and a
@@ -103,8 +111,9 @@ Every provider accepts an optional `<PROVIDER>_BASE_URL` override and a
 `NEXT_PUBLIC_PUBLIC_API_KEY` can override the key the built-in playground uses in the
 browser. Set `DATA_FILE` to an absolute writable path if you want telemetry persisted
 somewhere other than `./data.json`. On serverless hosts (e.g. Vercel) `/status` data
-survives cold starts out of the box — the gateway auto-mirrors telemetry to a free
-[jsonblob.com](https://jsonblob.com) blob (zero setup, ~24h rolling window; set
+survives cold starts out of the box — set `MONGODB_URI` for durable storage of all data
+(telemetry + chat history, recommended). Without it, the gateway auto-mirrors telemetry
+to a free [jsonblob.com](https://jsonblob.com) blob (zero setup, ~24h rolling window; set
 `REMOTE_JSON_URL` to any durable GET/PUT JSON endpoint for permanent history, or add
 `KV_REST_API_URL` + `KV_REST_API_TOKEN` from a free Vercel KV / Upstash store).
 `RANDOM_SESSION_TTL_SECONDS` (default 3600) controls
@@ -201,7 +210,8 @@ lib/
   ai/providers.ts                fetch layer, error parsing, SSE parser
   ai/pricing.ts                  per-model $/1M tables + cost estimation
   ai/tokens.ts                   char-based token estimation
-  db/store.ts                    JSON-file store (data.json telemetry + chats, KV + free remote-JSON mirror, in-memory fallback)
+  db/store.ts                    JSON-file store (data.json telemetry + chats, MongoDB + KV + free remote-JSON mirror, in-memory fallback)
+  db/mongo.ts                    MongoDB persistence (optional, recommended on serverless)
   db/log.ts                      request + provider-status logging helpers
   auth.ts                        timing-safe bearer validation + client detection
 ```
@@ -229,4 +239,4 @@ lib/
 - Per-user API keys + usage quotas
 - Redis/Postgres-backed sticky state for multi-instance deploys
 - Prompt caching / context compaction for agents
-- More providers (together.ai, Mistral, etc.) via the same catalog
+- Per-user API keys + usage quotas on MongoDB
