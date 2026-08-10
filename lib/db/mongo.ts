@@ -26,6 +26,10 @@ let clientPromise: Promise<MongoClient> | null = null;
  *  store's persist chain on every write. */
 let cooldownUntil = 0;
 const COOLDOWN_MS = 60_000;
+/** Skip the Mongo mirror when the snapshot would exceed a Mongo document
+ *  (16 MB hard cap); the file / KV / remote layers still persist it. */
+const MAX_DOC_BYTES = 12 * 1024 * 1024;
+let warnedOversize = false;
 
 export function mongoConfigured(): boolean {
   return Boolean(URI && URI.startsWith("mongodb"));
@@ -73,6 +77,15 @@ export async function mongoGet(): Promise<string | null> {
  */
 export async function mongoSet(snapshot: string): Promise<void> {
   if (!mongoConfigured()) return;
+  if (Buffer.byteLength(snapshot, "utf8") > MAX_DOC_BYTES) {
+    if (!warnedOversize) {
+      console.warn(
+        `[store] snapshot exceeds ${MAX_DOC_BYTES} bytes — skipping MongoDB mirror (file/KV/remote layers still persist).`,
+      );
+      warnedOversize = true;
+    }
+    return;
+  }
   const client = await getClient();
   await client
     .db(DB_NAME)

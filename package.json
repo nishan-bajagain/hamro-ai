@@ -12,6 +12,7 @@
     "test:api": "node scripts/verify-api.mjs",
     "test:store": "node scripts/verify-store.mjs",
     "test:remote": "node scripts/verify-remote.mjs",
+    "test:mongo": "node scripts/verify-mongo.mjs",
     "claude": "node scripts/run-claude.mjs",
     "claude:check": "node scripts/run-claude.mjs --check",
     "claude:serve": "node scripts/run-claude.mjs --serve-only",
@@ -35,6 +36,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "mongodb-memory-server": "^11.2.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

@@ -535,6 +535,12 @@ MONGODB_URI="mongodb+srv://user:pass@cluster.mongodb.net/?appName=..."
 MONGODB_DB="hamro"   # optional, default: hamro
 ```
 
+Everything — request logs, per-model/per-provider usage counters, provider
+health and chat history — is mirrored to one `hamro.store.telemetry`
+document. Verified end-to-end against a real (in-memory) MongoDB with
+`npm run test:mongo`.
+```
+
 **Option 1 — free remote JSON (zero setup).** The gateway auto-creates a free
 [jsonblob.com](https://jsonblob.com) blob on first write, remembers its URL in
 `data.json`, reuses it across restarts, and self-heals when the blob expires
