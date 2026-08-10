@@ -60,6 +60,10 @@ const SUPPORTS_INCLUDE_USAGE = new Set([
   "zenmux",
   "llm7",
   "cerebras",
+  // OpenAI-compatible providers verified to return real `usage` in the final
+  // SSE chunk — mistral and z.ai both accept stream_options.include_usage.
+  "mistral",
+  "zai",
 ]);
 
 /** Whether the provider accepts the `stream_options` body field. */

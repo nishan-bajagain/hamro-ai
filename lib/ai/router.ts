@@ -339,8 +339,12 @@ export function resolveChain(
     candidates.push({ provider: p, model: entry.model });
   }
 
-  // Sticky ordering: requested stays first; healthy providers sorted by
-  // recent EWMA latency (fastest first), then cooling-down providers last.
+  // Sticky ordering: a healthy requested provider stays first; the other
+  // healthy providers are sorted by recent EWMA latency (fastest first);
+  // cooling-down providers go last. If the REQUESTED provider itself is in
+  // cooldown (recently failed), it must not block the response — healthy
+  // providers are tried ahead of it, and it is still attempted (first in the
+  // cooling group) in case it recovered.
   const [first, ...rest] = candidates;
   const healthy = rest.filter((c) => !isProviderCoolingDown(c.provider.id));
   const cooling = rest.filter((c) => isProviderCoolingDown(c.provider.id));
@@ -349,26 +353,30 @@ export function resolveChain(
     const lb = providerLatencyMs(b.provider.id) ?? Number.POSITIVE_INFINITY;
     return la - lb;
   };
-  return { candidates: [first, ...healthy.sort(byLatency), ...cooling] };
+  return isProviderCoolingDown(first.provider.id)
+    ? { candidates: [...healthy.sort(byLatency), first, ...cooling] }
+    : { candidates: [first, ...healthy.sort(byLatency), ...cooling] };
 }
 
 /* ──────────────────────────── Timing ──────────────────────────────── */
 
-const NON_STREAM_TIMEOUT_MS = 60_000;
-const FIRST_CHUNK_BASE_TIMEOUT_MS = 20_000;
-const FIRST_CHUNK_MAX_TIMEOUT_MS = 90_000;
+const NON_STREAM_TIMEOUT_MS = 40_000;
+const FIRST_CHUNK_BASE_TIMEOUT_MS = 12_000;
+const FIRST_CHUNK_MAX_TIMEOUT_MS = 40_000;
 
 /**
- * Adaptive first-chunk timeout: starts at 20s but grows with a provider's
- * observed latency (e.g. OpenCode free models routinely take 15s+), so slow
- * but healthy providers are not wrongly failed over.
+ * Adaptive first-chunk timeout: starts at 12s but grows modestly (2x) with a
+ * provider's observed latency so slow-but-healthy free models are not wrongly
+ * failed over. Capped at 40s so a hung provider can never stall the failover
+ * walk for a minute (previously ewma*3 up to 90s — a provider with one slow
+ * 18s response got a 54s hang timeout).
  */
 function firstChunkTimeoutFor(providerId: string): number {
   const ewma = providerLatencyMs(providerId);
   if (!ewma) return FIRST_CHUNK_BASE_TIMEOUT_MS;
   return Math.min(
     FIRST_CHUNK_MAX_TIMEOUT_MS,
-    Math.max(FIRST_CHUNK_BASE_TIMEOUT_MS, ewma * 3),
+    Math.max(FIRST_CHUNK_BASE_TIMEOUT_MS, ewma * 2),
   );
 }
 

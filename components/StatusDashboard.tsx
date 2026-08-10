@@ -213,7 +213,7 @@ export function StatusDashboard() {
             />
             <StatCard
               label="Est. cost accrued"
-              value={`$${s.totalCostUsd.toFixed(4)}`}
+              value={fmtUsd(s.totalCostUsd)}
               sub="from standard pricing tables"
               icon={<Coins className="h-3.5 w-3.5 text-amber-400" />}
               accent="text-amber-300"
@@ -280,7 +280,7 @@ export function StatusDashboard() {
                       <Td className="text-right font-mono">{m.requests.toLocaleString()}</Td>
                       <Td className="text-right font-mono">{fmtNum(m.totalTokens)}</Td>
                       <Td className="text-right font-mono text-amber-300">
-                        ${m.costUsd.toFixed(4)}
+                        {fmtUsd(m.costUsd)}
                       </Td>
                       <Td className="text-right font-mono">
                         {m.avgLatencyMs ? `${m.avgLatencyMs.toFixed(0)}ms` : "—"}
@@ -353,7 +353,7 @@ export function StatusDashboard() {
                         {r.totalTokens > 0 ? r.totalTokens.toLocaleString() : "—"}
                       </Td>
                       <Td className="text-right font-mono text-amber-300/80">
-                        {r.costUsd > 0 ? `$${r.costUsd.toFixed(5)}` : "—"}
+                        {r.costUsd > 0 ? fmtUsd(r.costUsd) : "—"}
                       </Td>
                       <Td>
                         {r.error && (
@@ -412,7 +412,7 @@ function ProviderCard({ p }: { p: StatusPayload["perProvider"][number] }) {
           label="avg latency"
           value={p.avgLatencyMs ? `${p.avgLatencyMs.toFixed(0)}ms` : "—"}
         />
-        <MiniStat label="cost" value={`$${p.costUsd.toFixed(4)}`} />
+        <MiniStat label="cost" value={fmtUsd(p.costUsd)} />
       </div>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
@@ -500,6 +500,14 @@ function fmtNum(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return n.toLocaleString();
+}
+
+/** Adaptive USD formatting — small amounts must not truncate to $0.0000. */
+function fmtUsd(n: number): string {
+  if (!n) return "$0";
+  if (n >= 1) return `$${n.toFixed(2)}`;
+  if (n >= 0.001) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(6)}`;
 }
 
 function shortModel(id: string): string {

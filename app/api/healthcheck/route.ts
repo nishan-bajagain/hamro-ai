@@ -7,7 +7,7 @@ import { setProviderStatus } from "@/lib/db/log";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TIMEOUT_MS = 15_000;
+const TIMEOUT_MS = 25_000;
 /** How many models to try per provider before calling it down. Free tiers
  *  rate-limit individual models, so a provider whose FIRST model is
  *  exhausted should still report "online" when another model answers. */

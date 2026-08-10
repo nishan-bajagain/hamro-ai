@@ -396,7 +396,9 @@ function countersFromRequests(requests: StoredRequest[]): StoreCounters {
     if (r.statusCode !== 200) c.errors += 1;
     if (r.stream) c.streaming += 1;
     if (r.cached) c.cached += 1;
-    c.latencySum += r.latencyMs;
+    // Latency averages only count successful responses (a failed request's
+    // "latency" is time-to-failure, not response time).
+    if (r.statusCode === 200) c.latencySum += r.latencyMs;
     if (r.timestamp.getTime() >= since) c.last24hRequests += 1;
     const ts = r.timestamp.toISOString();
     if (ts > c.lastUsed) c.lastUsed = ts;
@@ -417,7 +419,7 @@ function countersFromRequests(requests: StoredRequest[]): StoreCounters {
     m.totalTokens += r.totalTokens;
     m.costUsd += r.costUsd;
     m.failovers += r.failovers;
-    m.latencySum += r.latencyMs;
+    if (r.statusCode === 200) m.latencySum += r.latencyMs;
     if (ts > m.lastUsed) m.lastUsed = ts;
 
     const p = (c.perProvider[r.provider] ??= {
@@ -430,7 +432,7 @@ function countersFromRequests(requests: StoredRequest[]): StoreCounters {
     p.requests += 1;
     p.costUsd += r.costUsd;
     p.failovers += r.failovers;
-    p.latencySum += r.latencyMs;
+    if (r.statusCode === 200) p.latencySum += r.latencyMs;
     if (ts > p.lastUsed) p.lastUsed = ts;
   }
   return c;
@@ -746,7 +748,7 @@ class JsonStore {
     if (r.statusCode !== 200) c.errors += 1;
     if (r.stream) c.streaming += 1;
     if (r.cached) c.cached += 1;
-    c.latencySum += r.latencyMs;
+    c.latencySum += r.statusCode === 200 ? r.latencyMs : 0;
     const now = Date.now();
     if (r.timestamp.getTime() >= now - 24 * 60 * 60 * 1000) c.last24hRequests += 1;
     const ts = r.timestamp.toISOString();
@@ -768,7 +770,7 @@ class JsonStore {
     m.totalTokens += r.totalTokens;
     m.costUsd += r.costUsd;
     m.failovers += r.failovers;
-    m.latencySum += r.latencyMs;
+    m.latencySum += r.statusCode === 200 ? r.latencyMs : 0;
     if (ts > m.lastUsed) m.lastUsed = ts;
 
     const p = (c.perProvider[r.provider] ??= {
@@ -781,7 +783,7 @@ class JsonStore {
     p.requests += 1;
     p.costUsd += r.costUsd;
     p.failovers += r.failovers;
-    p.latencySum += r.latencyMs;
+    p.latencySum += r.statusCode === 200 ? r.latencyMs : 0;
     if (ts > p.lastUsed) p.lastUsed = ts;
   }
 

@@ -31,7 +31,7 @@ export async function GET() {
   let errors = 0;
   let streamingRequests = 0;
   let cachedResponses = 0;
-  let last24hRequests = 0;
+  let successfulRequests = 0;
 
   if (useCounters) {
     totalRequests = counters.requests;
@@ -40,13 +40,14 @@ export async function GET() {
     totalTokens = counters.totalTokens;
     totalCostUsd = counters.costUsd;
     totalFailovers = counters.failovers;
+    // Latency sums only count successful responses (see store.ts) — divide by
+    // the successful count, not the total, so "avg latency" is response time.
     latencySum = counters.latencySum;
     errors = counters.errors;
     streamingRequests = counters.streaming;
     cachedResponses = counters.cached;
-    last24hRequests = counters.last24hRequests;
+    successfulRequests = Math.max(0, totalRequests - errors);
   } else {
-    const since = Date.now() - DAY_MS;
     for (const r of requests) {
       totalRequests += 1;
       totalPromptTokens += r.promptTokens;
@@ -54,12 +55,26 @@ export async function GET() {
       totalTokens += r.totalTokens;
       totalCostUsd += r.costUsd;
       totalFailovers += r.failovers;
-      latencySum += r.latencyMs;
       if (r.statusCode !== 200) errors += 1;
+      if (r.statusCode === 200) {
+        successfulRequests += 1;
+        latencySum += r.latencyMs;
+      }
       if (r.stream) streamingRequests += 1;
       if (r.cached) cachedResponses += 1;
-      if (r.timestamp.getTime() >= since) last24hRequests += 1;
     }
+  }
+
+  // "Last 24h" is computed from the request log, not the monotonic counter:
+  // the counter only ever increments, so it would keep counting requests that
+  // have since aged out of the 24h window. The log is capped at 5,000 recent
+  // records — far more than a day's volume at gateway scale — so this scan is
+  // the accurate source. (If the log is ever saturated within 24h, the number
+  // under-reports rather than over-reports.)
+  const since24 = Date.now() - DAY_MS;
+  let last24hRequests = 0;
+  for (const r of requests) {
+    if (r.timestamp.getTime() >= since24) last24hRequests += 1;
   }
 
   /* ── Per model ── */
@@ -241,7 +256,8 @@ export async function GET() {
       totalTokens,
       totalCostUsd,
       totalFailovers,
-      avgLatencyMs: totalRequests > 0 ? Math.round(latencySum / totalRequests) : null,
+      avgLatencyMs:
+        successfulRequests > 0 ? Math.round(latencySum / successfulRequests) : null,
       errors,
       successRate:
         totalRequests > 0 ? Math.round(((totalRequests - errors) / totalRequests) * 1000) / 10 : 100,
